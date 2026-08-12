@@ -1,0 +1,42 @@
+{
+  "name": "piw",
+  "version": "0.1.0",
+  "description": "A lightweight profile registry and launcher for Pi",
+  "type": "module",
+  "bin": {
+    "piw": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && chmod +x dist/cli.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "validate": "npm run typecheck && npm test && npm run build",
+    "pack:check": "npm pack --dry-run --cache /tmp/piw-npm-cache",
+    "smoke": "npm run build && node scripts/smoke.mjs",
+    "smoke:tarball": "npm run build && node scripts/tarball-smoke.mjs"
+  },
+  "dependencies": {
+    "ink": "^7.0.0",
+    "react": "^19.2.0",
+    "semver": "^7.7.2",
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "@types/react": "^19.1.12",
+    "@types/semver": "^7.7.1",
+    "ink-testing-library": "^4.0.0",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  },
+  "license": "MIT"
+}

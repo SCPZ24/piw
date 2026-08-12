@@ -1,6 +1,6 @@
 # PIW — Requirements & Product Design
 
-> Status: Approved v0.1 contract
+> Status: v1.0 release contract
 >
 > Product name: `piw`
 >
@@ -29,7 +29,7 @@ PIW is not another Pi Agent Home, package manager, resource installer, dependenc
 
 ## 2. Goals and Non-Goals
 
-PIW v0.1 SHALL:
+PIW v1.0 SHALL:
 
 - provide named profiles without duplicating Pi Agent Homes;
 - expose extensions, skills, prompt templates, themes, and Pi packages through one flat Entry abstraction;
@@ -41,7 +41,7 @@ PIW v0.1 SHALL:
 - support conservative Entry-local Git and npm updates when explicitly invoked; and
 - replace itself with Pi through `process.execve()`.
 
-PIW v0.1 SHALL NOT:
+PIW v1.0 SHALL NOT:
 
 - replace or redirect `~/.pi/agent`;
 - install, copy, move, rename, delete, repair, normalize, or vendor Entry content;
@@ -57,7 +57,7 @@ PIW v0.1 SHALL NOT:
 
 ## 3. Filesystem and Ownership Contract
 
-PIW v0.1 uses one flat root:
+PIW v1.0 uses one flat root:
 
 ```text
 ~/.pi/piw/
@@ -372,7 +372,7 @@ Arguments after an explicit `--` are appended exactly without shell parsing, exc
 --no-themes
 ```
 
-PIW resolves `pi` from `PATH`, executes `pi --version`, and requires at least `0.84.1`. It then calls `process.execve()` with the absolute Pi executable, `['pi', ...compiledArgs]`, and the current environment. PIW does not use a shell, change cwd, replace stdio, spawn a supervisor, or fall back to supervision.
+PIW resolves `pi` from `PATH`, executes `pi --version`, and requires at least `0.83.0`. It then calls `process.execve()` with the absolute Pi executable, `['pi', ...compiledArgs]`, and the current environment. PIW does not use a shell, change cwd, replace stdio, spawn a supervisor, or fall back to supervision.
 
 ## 9. Entry Update Contract
 
@@ -398,7 +398,7 @@ flowchart TD
 
 With Git available, PIW runs `git -C <entry> rev-parse --show-toplevel` and requires the resolved result to equal Entry `realPath`. This supports normal repositories and linked worktrees whose `.git` is a file. A subdirectory of a larger repository is not Git-managed by PIW.
 
-When Git is unavailable but a root `.git` file or directory exists, PIW still reports a Git phase as skipped because Git is missing.
+When a root `.git` file or directory exists, PIW retains a Git phase even if worktree verification fails. Missing Git is reported as a safe skip; a failed `rev-parse` or unresolved reported root is reported as `could not verify Git worktree`. In either case a following npm phase is blocked because the Git state did not complete safely.
 
 Before mutation PIW requires a clean worktree, attached HEAD, and upstream. Dirty state, detached HEAD, missing upstream, or missing Git is a safe skip. The only mutation is:
 
@@ -505,13 +505,14 @@ Conformance requires at least:
 13. Resource pass-through overrides exit `2`; non-resource arguments remain exact.
 14. Git-only, npm-only, and Git+npm Entries run the correct phases.
 15. Dirty, detached, or no-upstream Git prevents npm mutation for that Entry.
-16. A Git subdirectory never pulls the parent repository.
-17. One Entry failure does not stop later Entries.
-18. Doctor reports missing Pi as an error but optional missing managers as warnings.
-19. Smoke tests use an isolated fake Pi and verify the exact extension argv.
-20. Successful launch uses `process.execve()` rather than supervision.
+16. A corrupt or unverifiable root Git marker prevents npm mutation for that Entry.
+17. A Git subdirectory never pulls the parent repository and may still run its own npm phase.
+18. One Entry failure does not stop later Entries.
+19. Doctor reports missing Pi as an error but optional missing managers as warnings.
+20. Smoke tests use an isolated fake Pi and verify the exact extension argv.
+21. Successful launch uses `process.execve()` rather than supervision.
 
-## 14. Deferred Beyond v0.1
+## 14. Deferred Beyond v1.0
 
 - Entry aliases or manual kind overrides;
 - configurable or multiple registry roots;

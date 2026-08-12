@@ -1,7 +1,7 @@
 import {describe, expect, test, vi} from "vitest";
 import type {EntryKind, PiwStateV1, ValidEntry} from "../src/domain.js";
 import {resolveProfiles} from "../src/profiles/resolve.js";
-import {compilePiArgs} from "../src/launcher/launcher.js";
+import {compilePiArgs, MINIMUM_PI_VERSION} from "../src/launcher/launcher.js";
 import {printList} from "../src/app.js";
 
 const entry = (id: string, kind: EntryKind, launchPath: string): ValidEntry => ({id, kind, launchPath, status: "valid", registryPath: `/r/${id}`, realPath: `/real/${id}`, diagnostics: []});
@@ -11,6 +11,10 @@ test("keeps broken and empty profiles visible", () => {
   expect(resolveProfiles(state, []).map(({name, available}) => ({name, available}))).toEqual([
     {name: "broken", available: false}, {name: "empty", available: true},
   ]);
+});
+
+test("uses Pi 0.83.0 as the release baseline", () => {
+  expect(MINIMUM_PI_VERSION).toBe("0.83.0");
 });
 
 describe("compilePiArgs", () => {

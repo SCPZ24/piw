@@ -6,6 +6,7 @@ export interface UpdateStep {
   manager: UpdateManager;
   key: string;
   cwd: string;
+  blockedReason?: string;
 }
 
 export type StepResult =

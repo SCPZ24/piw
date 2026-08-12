@@ -91,11 +91,21 @@ describe("system update adapter", () => {
     const root = await mkdtemp(path.join(tmpdir(), "piw-update-subdir-"));
     const child = path.join(root, "child");
     await mkdir(child);
+    await writeFile(path.join(child, "package.json"), "{}\n");
     const updater = createSystemUpdater({
-      findExecutable: async (name) => name === "git" ? "/bin/git" : undefined,
+      findExecutable: async (name) => name === "git" ? "/bin/git" : "/bin/npm",
       commandOutput: async () => output(`${root}\n`),
     });
-    expect(await updater.detect(entry("child", child))).toEqual([]);
+    expect(await updater.detect(entry("child", child))).toEqual([
+      {manager: "npm", key: `npm:${child}`, cwd: child},
+    ]);
+  });
+
+  test("detects a non-Git root package.json as npm-only", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "piw-update-npm-only-"));
+    await writeFile(path.join(root, "package.json"), "{}\n");
+    const updater = createSystemUpdater({findExecutable: async (name) => name === "npm" ? "/bin/npm" : undefined, commandOutput: async () => output()});
+    expect(await updater.detect(entry("x", root))).toEqual([{manager: "npm", key: `npm:${root}`, cwd: root}]);
   });
 
   test("keeps a Git phase when git is missing but a linked-worktree marker exists", async () => {
@@ -104,6 +114,42 @@ describe("system update adapter", () => {
     const updater = createSystemUpdater({findExecutable: async () => undefined, commandOutput: async () => output()});
     expect(await updater.detect(entry("x", root))).toEqual([{manager: "git", key: `git:${root}`, cwd: root}]);
     expect(await updater.execute({manager: "git", key: `git:${root}`, cwd: root})).toEqual({manager: "git", status: "skipped", reason: "git not found"});
+  });
+
+  test("blocks npm when a Git marker cannot be verified as a worktree", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "piw-update-corrupt-git-"));
+    await mkdir(path.join(root, ".git"));
+    await writeFile(path.join(root, "package.json"), "{}\n");
+    const commandOutput = vi.fn(async (_command: string, args: string[]) => args.includes("--show-toplevel")
+      ? output("", 128, "fatal: not a git repository")
+      : output());
+    const updater = createSystemUpdater({findExecutable: async (name) => name === "git" ? "/bin/git" : "/bin/npm", commandOutput});
+
+    const phases = await updater.detect(entry("x", root));
+    const [result] = await runUpdates([entry("x", root)], async () => phases, updater.execute);
+
+    expect(result?.steps).toEqual([
+      {manager: "git", status: "failed", reason: "could not verify Git worktree"},
+      {manager: "npm", status: "skipped", reason: "git phase did not complete safely"},
+    ]);
+    expect(commandOutput.mock.calls.some(([, args]) => args[0] === "update")).toBe(false);
+  });
+
+  test("blocks npm when git is missing and an Entry has a Git marker", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "piw-update-missing-git-"));
+    await writeFile(path.join(root, ".git"), "gitdir: /missing/worktree\n");
+    await writeFile(path.join(root, "package.json"), "{}\n");
+    const commandOutput = vi.fn(async () => output());
+    const updater = createSystemUpdater({findExecutable: async (name) => name === "npm" ? "/bin/npm" : undefined, commandOutput});
+
+    const phases = await updater.detect(entry("x", root));
+    const [result] = await runUpdates([entry("x", root)], async () => phases, updater.execute);
+
+    expect(result?.steps).toEqual([
+      {manager: "git", status: "skipped", reason: "git not found"},
+      {manager: "npm", status: "skipped", reason: "git phase did not complete safely"},
+    ]);
+    expect(commandOutput).not.toHaveBeenCalled();
   });
 
   test("executes npm update in the Entry root and reports npm JSON counts", async () => {

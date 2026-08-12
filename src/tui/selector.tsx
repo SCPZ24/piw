@@ -17,7 +17,7 @@ export function Selector({profiles, onSelect, onCancel}: {profiles: SelectorProf
   return <Box flexDirection="column">
     <Text bold>Select Pi Profile</Text>
     <Text> </Text>
-    {profiles.map((profile, row) => <Text key={profile.name} {...(row === index ? {color: "cyan"} : {})}>{row === index ? "> " : "  "}{profile.name}  {profile.available ? "ready" : "unavailable"}</Text>)}
+    {profiles.map((profile, row) => <Text key={profile.name} dimColor={!profile.available} {...(row === index ? {color: "cyan"} : {})}>{row === index ? "> " : "  "}{profile.name}  {profile.available ? "ready" : "unavailable"}</Text>)}
     {current && !current.available ? <Box marginTop={1} flexDirection="column">{current.diagnostics.map((item) => <Text key={`${item.code}:${item.message}`} color="red">{item.message}</Text>)}</Box> : null}
     <Text dimColor>↑/↓ move  Enter launch  q/Esc cancel</Text>
   </Box>;

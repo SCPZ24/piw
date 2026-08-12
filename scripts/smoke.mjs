@@ -7,7 +7,8 @@ const root = await mkdtemp(path.join(tmpdir(), "piw-smoke-"));
 const fixture = await createSmokeEnvironment(root);
 const cli = new URL("../dist/cli.js", import.meta.url).pathname;
 for (const args of [["--version"], ["--help"], ["list"], ["doctor"]]) {
-  assertCommand(process.execPath, [cli, ...args], fixture.environment, `piw ${args.join(" ")}`);
+  const result = assertCommand(process.execPath, [cli, ...args], fixture.environment, `piw ${args.join(" ")}`);
+  if (args[0] === "--version" && result.stdout.trim() !== "1.0.0") throw new Error(`piw --version returned ${result.stdout.trim()}`);
 }
 await assertLaunch(process.execPath, [cli], fixture);
 

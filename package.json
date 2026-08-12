@@ -1,7 +1,7 @@
 {
-  "name": "piw",
-  "version": "0.1.0",
-  "description": "A lightweight profile registry and launcher for Pi",
+  "name": "@scpz24/piw",
+  "version": "1.0.0",
+  "description": "A lightweight filesystem-native profile manager and launcher for Pi",
   "type": "module",
   "bin": {
     "piw": "./dist/cli.js"
@@ -9,7 +9,8 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "engines": {
     "node": ">=22.19.0"
@@ -22,7 +23,8 @@
     "validate": "npm run typecheck && npm test && npm run build",
     "pack:check": "npm pack --dry-run --cache /tmp/piw-npm-cache",
     "smoke": "npm run build && node scripts/smoke.mjs",
-    "smoke:tarball": "npm run build && node scripts/tarball-smoke.mjs"
+    "smoke:tarball": "npm run build && node scripts/tarball-smoke.mjs",
+    "compat:pi": "npm run build && node scripts/pi-compat.mjs"
   },
   "dependencies": {
     "ink": "^7.0.0",
@@ -38,5 +40,24 @@
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
   },
-  "license": "MIT"
+  "keywords": [
+    "pi",
+    "pi-agent",
+    "cli",
+    "tui",
+    "profile",
+    "agent"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SCPZ24/piw.git"
+  },
+  "homepage": "https://github.com/SCPZ24/piw#readme",
+  "bugs": {
+    "url": "https://github.com/SCPZ24/piw/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }

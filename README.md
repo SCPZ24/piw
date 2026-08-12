@@ -27,16 +27,12 @@ There is no `entries/` layer and no kind-based registry hierarchy. PIW never cop
 ## Requirements
 
 - Node.js 22.19.0 or newer
-- Pi 0.84.1 or newer
+- Pi 0.83.0 or newer
 - macOS or Linux
 
 ## Install
 
-The final package identity is selected at release time according to `docs/release.md`:
-
 ```bash
-npm install -g piw
-# fallback when the unscoped package is unavailable:
 npm install -g @scpz24/piw
 ```
 
@@ -100,4 +96,4 @@ It then explicitly loads the selected Entries and replaces itself with Pi using 
 
 PIW performs minimal structural availability checks, not sandboxing or trust verification. Extensions execute with your permissions, skills can direct an agent to act, and Git/npm updates can run manager-defined behavior. Review every Entry before launching or updating it.
 
-The complete v0.1 behavior contract is in [docs/RPD.md](docs/RPD.md); release policy is in [docs/release.md](docs/release.md).
+The complete v1.0 behavior contract is in [docs/RPD.md](docs/RPD.md); release policy is in [docs/release.md](docs/release.md).

@@ -13,7 +13,7 @@ export async function createSmokeEnvironment(root) {
   await writeFile(path.join(browser, "index.ts"), "export {};\n");
   await writeFile(path.join(piwHome, "piw.json"), JSON.stringify({version: 1, profiles: {builder: {entries: ["browser"]}}}) + "\n");
   const pi = path.join(bin, "pi");
-  await writeFile(pi, `#!${process.execPath}\nimport {writeFileSync} from "node:fs";\nif (process.argv[2] === "--version") { console.log("0.84.1"); process.exit(0); }\nwriteFileSync(process.env.PIW_FAKE_PI_ARGS, JSON.stringify(process.argv.slice(2)));\n`, {mode: 0o755});
+  await writeFile(pi, `#!${process.execPath}\nimport {writeFileSync} from "node:fs";\nif (process.argv[2] === "--version") { console.log("0.83.0"); process.exit(0); }\nwriteFileSync(process.env.PIW_FAKE_PI_ARGS, JSON.stringify(process.argv.slice(2)));\n`, {mode: 0o755});
   const environment = {...process.env, HOME: home, PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`, PIW_FAKE_PI_ARGS: argsFile};
   return {home, piwHome, browser, argsFile, environment};
 }

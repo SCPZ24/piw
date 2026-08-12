@@ -4,7 +4,7 @@ import path from "node:path";
 import {describe, expect, test} from "vitest";
 import {runDoctor} from "../src/app.js";
 
-async function fakePi(root: string, version = "0.84.1"): Promise<string> {
+async function fakePi(root: string, version = "0.83.0"): Promise<string> {
   const bin = path.join(root, "bin");
   await mkdir(bin, {recursive: true});
   const executable = path.join(bin, "pi");
@@ -36,7 +36,7 @@ describe("read-only doctor", () => {
     expect(output).toContain("newer than this release supports");
     expect(output).toContain("Unsupported root item: loose.ts");
     expect(output).toContain("Profile checks unavailable");
-    expect(output).toContain("OK pi 0.84.1");
+    expect(output).toContain("OK pi 0.83.0");
     expect(output).toContain("WARN git not found");
     expect(output).toContain("WARN npm not found");
   });

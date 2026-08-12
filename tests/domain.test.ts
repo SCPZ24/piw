@@ -2,7 +2,7 @@ import {describe, expect, test} from "vitest";
 import {naturalCompare, validateIdentifier, validateProfileName} from "../src/domain.js";
 
 describe("identifiers", () => {
-  test("accepts the v0.1 identifier grammar", () => {
+  test("accepts the Entry identifier grammar", () => {
     expect(validateIdentifier("builder_2")).toBe(true);
     expect(validateIdentifier("Upper")).toBe(false);
     expect(validateIdentifier("a".repeat(65))).toBe(false);

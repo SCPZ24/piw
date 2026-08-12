@@ -5,7 +5,7 @@ import path from "node:path";
 import semver from "semver";
 import {naturalCompare, type ValidEntry} from "../domain.js";
 
-export const MINIMUM_PI_VERSION = "0.84.1";
+export const MINIMUM_PI_VERSION = "0.83.0";
 export const ISOLATION_ARGS = ["--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes"] as const;
 
 export function compilePiArgs(entries: readonly ValidEntry[], passthrough: string[]): string[] {

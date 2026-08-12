@@ -1,6 +1,6 @@
 # PIW Release Policy
 
-> Status: Approved v0.1 contract
+> Status: v1.0 release policy
 >
 > Product: `piw`
 >
@@ -36,12 +36,12 @@ PIW does not provide:
 
 ## 2. Supported Runtime Baseline
 
-PIW v0.1 officially supports:
+PIW v1.0 officially supports:
 
 | Component | Required baseline |
 |---|---|
 | Node.js | `>=22.19.0` |
-| Pi | `>=0.84.1` |
+| Pi | `>=0.83.0` |
 | Operating system | macOS or Linux |
 | Terminal | Modern ANSI terminal for interactive commands |
 
@@ -57,7 +57,7 @@ PIW v0.1 officially supports:
 
 The Node baseline is required because PIW's launch contract uses `process.execve()`, available from Node 22.15.0. PIW deliberately sets the slightly higher `22.19.0` floor to match its validated runtime baseline.
 
-Windows and IBM i are not supported in v0.1 because Node does not expose `process.execve()` there. Other Unix-like platforms may work but do not receive platform-specific support until explicitly added to the compatibility matrix.
+Windows and IBM i are not supported in v1.0 because Node does not expose `process.execve()` there. Other Unix-like platforms may work but do not receive platform-specific support until explicitly added to the compatibility matrix.
 
 Ghostty is a primary development terminal, not a runtime dependency.
 
@@ -65,13 +65,9 @@ Ghostty is a primary development terminal, not a runtime dependency.
 
 ## 3. npm Package Identity
 
-Before the first publication, the releaser MUST check whether the unscoped npm package name `piw` is available and controlled by the project.
+The unscoped npm package `piw` is controlled by another publisher, so the v1.0 package identity is `@scpz24/piw`. The package declares public scoped access in `publishConfig`; npm authentication and scope permission are still mandatory at publication time.
 
-The package-name decision is deterministic:
-
-1. If unscoped `piw` is available and controlled, publish as `piw`.
-2. Otherwise publish as `@scpz24/piw`.
-3. If the project lacks permission to publish `@scpz24/piw`, publication is blocked until that permission is resolved. A releaser MUST NOT invent a third package name ad hoc.
+Publication requires verified permission for the `@scpz24` npm scope. If the publisher lacks that permission, publication is blocked until it is resolved. A releaser MUST NOT invent a different package name ad hoc.
 
 The selected package name MUST expose the same executable:
 
@@ -84,19 +80,11 @@ The selected package name MUST expose the same executable:
 }
 ```
 
-Installation is therefore one of:
-
-```bash
-npm install -g piw
-```
-
-or the predetermined fallback:
-
 ```bash
 npm install -g @scpz24/piw
 ```
 
-Both installations MUST place `piw` on `PATH`.
+Installation MUST place `piw` on `PATH`.
 
 ---
 
@@ -156,12 +144,6 @@ Installation MAY create PIW-owned directories only when the executable first run
 Uninstalling PIW:
 
 ```bash
-npm uninstall -g piw
-```
-
-or:
-
-```bash
 npm uninstall -g @scpz24/piw
 ```
 
@@ -175,7 +157,7 @@ An installed release MUST:
 - use atomic replacement for migrated state; and
 - create a recoverable backup before any future destructive or structurally significant migration.
 
-Migration backup files are not active canonical state. v0.1 defines schema version 1 and requires no migration from an earlier public schema.
+Migration backup files are not active canonical state. Application version `1.0.0` uses state schema version `1`; these version domains are independent. No migration from an earlier public schema is required.
 
 ---
 
@@ -236,18 +218,7 @@ PIW follows Semantic Versioning:
 MAJOR.MINOR.PATCH
 ```
 
-Examples:
-
-```text
-0.1.0
-0.2.0
-0.2.1
-1.0.0
-```
-
-Before `1.0.0`, a minor release may contain breaking changes, but the changelog and release notes MUST identify them explicitly.
-
-After `1.0.0`:
+Starting with `1.0.0`:
 
 - PATCH is a backward-compatible fix;
 - MINOR is a backward-compatible feature; and
@@ -268,8 +239,8 @@ npm publish
 Prereleases use SemVer prerelease identifiers and explicit non-stable tags:
 
 ```text
-0.2.0-beta.1
-0.2.0-rc.1
+1.1.0-beta.1
+1.1.0-rc.1
 ```
 
 ```bash
@@ -282,12 +253,10 @@ The `latest` tag MUST NOT point to a prerelease version.
 Users may install a specific or tagged version:
 
 ```bash
-npm install -g piw@0.2.0
-npm install -g piw@latest
-npm install -g piw@beta
+npm install -g @scpz24/piw@1.0.0
+npm install -g @scpz24/piw@latest
+npm install -g @scpz24/piw@beta
 ```
-
-When the scoped fallback is active, replace `piw` in these package specs with `@scpz24/piw`.
 
 ---
 
@@ -296,16 +265,10 @@ When the scoped fallback is active, replace `piw` in these package specs with `@
 PIW itself is updated through npm:
 
 ```bash
-npm install -g piw@latest
-```
-
-or:
-
-```bash
 npm install -g @scpz24/piw@latest
 ```
 
-PIW MUST NOT implement a self-updater in v0.1.
+PIW MUST NOT implement a self-updater in v1.0.
 
 The commands have distinct responsibilities:
 
@@ -359,6 +322,7 @@ dist/
 package.json
 README.md
 LICENSE
+CHANGELOG.md
 ```
 
 Development-only content should be excluded:
@@ -386,7 +350,7 @@ internal planning documents
 
 Each stable release MUST run launch-contract smoke tests against:
 
-1. Pi `0.84.1`, the minimum supported version; and
+1. Pi `0.83.0`, the minimum supported version; and
 2. the latest stable Pi version at release time.
 
 The smoke test MUST confirm that Pi still supports:
@@ -402,7 +366,7 @@ The smoke test MUST confirm that Pi still supports:
 
 It MUST also confirm that explicit resources remain available when their corresponding automatic discovery flags are disabled.
 
-If the latest Pi release breaks the contract while `0.84.1` still works, publication is blocked until PIW's compatibility policy or implementation is deliberately revised. The releaser MUST NOT silently raise or remove version checks.
+If the latest Pi release breaks the contract while `0.83.0` still works, publication is blocked until PIW's compatibility policy or implementation is deliberately revised. The releaser MUST NOT silently raise or remove version checks.
 
 ---
 
@@ -467,7 +431,7 @@ Before publishing a stable release:
 
 ### Compatibility
 
-- [ ] The launch contract passes against Pi `0.84.1`.
+- [ ] The launch contract passes against Pi `0.83.0`.
 - [ ] The launch contract passes against the latest stable Pi.
 - [ ] macOS smoke tests pass on a supported Node release.
 - [ ] Linux smoke tests pass on a supported Node release.
@@ -497,8 +461,8 @@ flowchart TD
 2. PIW is implemented in TypeScript and publishes compiled ESM JavaScript.
 3. Every package identity exposes one executable named `piw`.
 4. The minimum Node version is `22.19.0`.
-5. The minimum Pi version is `0.84.1`.
-6. Official v0.1 platforms are macOS and Linux.
+5. The minimum Pi version is `0.83.0`.
+6. Official v1.0 platforms are macOS and Linux.
 7. PIW ships no standalone binary, Homebrew formula, or curl installer.
 8. Product behavior and state semantics come from `RPD.md` and are not duplicated here.
 9. PIW itself is updated through npm, never through `piw update`.

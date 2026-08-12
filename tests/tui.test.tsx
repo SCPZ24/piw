@@ -1,4 +1,5 @@
 import React from "react";
+import chalk from "chalk";
 import {expect, test, vi} from "vitest";
 import {render} from "ink-testing-library";
 import {Selector} from "../src/tui/selector.js";
@@ -14,6 +15,21 @@ test("selector skips unavailable profiles and selects a ready profile", async ()
   view.stdin.write("\r");
   await new Promise((resolve) => setTimeout(resolve, 10));
   expect(selected).toHaveBeenCalledWith("ready");
+});
+
+test("selector visibly dims unavailable profiles", () => {
+  const colorLevel = chalk.level;
+  chalk.level = 1;
+  try {
+    const view = render(<Selector profiles={[
+      {name: "ready", available: true, diagnostics: []},
+      {name: "broken", available: false, diagnostics: [{severity: "error", code: "missing", message: "Entry missing"}]},
+    ]} onSelect={() => undefined} onCancel={() => undefined} />);
+
+    expect(view.lastFrame()).toMatch(/\u001B\[2m\s+broken\s+unavailable\u001B\[22m/);
+  } finally {
+    chalk.level = colorLevel;
+  }
 });
 
 test("config creates and saves a profile", async () => {

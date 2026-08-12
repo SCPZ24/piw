@@ -14,14 +14,26 @@ export interface Diagnostic {
   hint?: string;
 }
 
-export interface Entry {
+export interface EntryBase {
   id: string;
-  kind: EntryKind;
   registryPath: string;
   realPath: string;
-  status: "valid" | "invalid";
   diagnostics: Diagnostic[];
 }
+
+export interface ValidEntry extends EntryBase {
+  status: "valid";
+  kind: EntryKind;
+  launchPath: string;
+}
+
+export interface InvalidEntry extends EntryBase {
+  status: "invalid";
+  kind?: EntryKind;
+  launchPath?: string;
+}
+
+export type Entry = ValidEntry | InvalidEntry;
 
 export interface PiwStateV1 {
   version: 1;

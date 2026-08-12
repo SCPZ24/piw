@@ -1,22 +1,20 @@
-import {mkdtemp, mkdir, readFile, writeFile} from "node:fs/promises";
+import {mkdtemp, readFile, writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import path from "node:path";
-import {spawnSync} from "node:child_process";
+import {assertCommand, assertLaunch, createSmokeEnvironment} from "./smoke-helpers.mjs";
 
 const root = await mkdtemp(path.join(tmpdir(), "piw-smoke-"));
-const home = path.join(root, "home");
-await mkdir(path.join(home, ".pi", "piw", "entries"), {recursive: true});
-await writeFile(path.join(home, ".pi", "piw", "piw.json"), '{"version":1,"profiles":{}}\n');
-const cli = new URL("../dist/cli.js", import.meta.url);
+const fixture = await createSmokeEnvironment(root);
+const cli = new URL("../dist/cli.js", import.meta.url).pathname;
 for (const args of [["--version"], ["--help"], ["list"], ["doctor"]]) {
-  const result = spawnSync(process.execPath, [cli.pathname, ...args], {env: {...process.env, HOME: home}, encoding: "utf8"});
-  if (result.status !== 0) throw new Error(`smoke failed for ${args.join(" ")}: ${result.stderr}`);
+  assertCommand(process.execPath, [cli, ...args], fixture.environment, `piw ${args.join(" ")}`);
 }
-await writeFile(path.join(home, ".pi", "piw", "piw.json"), '{"version":3,"profiles":{}}\n');
-const future = spawnSync(process.execPath, [cli.pathname, "list"], {env: {...process.env, HOME: home}, encoding: "utf8"});
-if (future.status !== 1 || !future.stderr.includes("newer")) throw new Error("future schema was not rejected");
-if (!String(await readFile(path.join(home, ".pi", "piw", "piw.json"))).includes('"version":3')) throw new Error("future schema was modified");
-await writeFile(path.join(home, ".pi", "piw", "piw.json"), '{"version":1,"profiles":{}}\n');
-const state = JSON.parse(await readFile(path.join(home, ".pi", "piw", "piw.json"), "utf8"));
-if (state.version !== 1) throw new Error("smoke state was corrupted");
+await assertLaunch(process.execPath, [cli], fixture);
+
+await writeFile(path.join(fixture.piwHome, "piw.json"), '{"version":3,"profiles":{}}\n');
+const future = assertCommand(process.execPath, [cli, "--version"], fixture.environment, "piw --version after future state fixture");
+if (future.status !== 0) throw new Error("version command unexpectedly read state");
+const list = (await import("node:child_process")).spawnSync(process.execPath, [cli, "list"], {env: fixture.environment, encoding: "utf8"});
+if (list.status !== 1 || !list.stderr.includes("newer")) throw new Error("future schema was not rejected");
+if (!String(await readFile(path.join(fixture.piwHome, "piw.json"))).includes('"version":3')) throw new Error("future schema was modified");
 console.log(`PIW smoke passed in ${root}`);

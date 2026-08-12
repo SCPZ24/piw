@@ -12,7 +12,10 @@ describe("parsePiwArgs", () => {
     expect(parsePiwArgs(argv as string[])).toEqual(expected);
   });
 
-  test.each(["-e", "--extension", "--skill=x", "--theme", "--no-skills", "-ns", "-np", "-ne"])(
+  test.each([
+    "-e", "--extension", "--extension=x", "--skill", "--skill=x", "--prompt-template", "--prompt-template=x", "--theme", "--theme=x",
+    "--no-extensions", "-ne", "--no-skills", "-ns", "--no-prompt-templates", "-np", "--no-themes",
+  ])(
     "rejects managed pass-through option %s",
     (option) => expect(() => parsePiwArgs(["builder", "--", option])).toThrow(CliUsageError),
   );

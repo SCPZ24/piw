@@ -3,16 +3,16 @@ import {constants} from "node:fs";
 import {access, realpath} from "node:fs/promises";
 import path from "node:path";
 import semver from "semver";
-import {naturalCompare, type Entry} from "../domain.js";
+import {naturalCompare, type ValidEntry} from "../domain.js";
 
 export const MINIMUM_PI_VERSION = "0.84.1";
 export const ISOLATION_ARGS = ["--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes"] as const;
 
-export function compilePiArgs(entries: Entry[], passthrough: string[]): string[] {
+export function compilePiArgs(entries: readonly ValidEntry[], passthrough: string[]): string[] {
   const args: string[] = [...ISOLATION_ARGS];
   for (const entry of [...entries].sort((a, b) => naturalCompare(a.id, b.id))) {
     const flag = entry.kind === "extension" || entry.kind === "package" ? "-e" : entry.kind === "skill" ? "--skill" : entry.kind === "prompt" ? "--prompt-template" : "--theme";
-    args.push(flag, entry.realPath);
+    args.push(flag, entry.launchPath);
   }
   return [...args, ...passthrough];
 }

@@ -113,7 +113,7 @@ src/
 ├── registry/     # Entry discovery and classification
 ├── profiles/     # profile validation and resolution
 ├── launcher/     # Pi argv compilation and execve
-├── updater/      # Git/npm evidence and execution
+├── updater/      # Entry-local Git/npm phase detection and execution
 └── tui/          # selector and profile configuration
 ```
 
@@ -140,7 +140,7 @@ The following product behaviors are defined exclusively in `RPD.md` and MUST NOT
 - selector and configuration behavior;
 - CLI commands and exit codes;
 - Pi argv compilation and resource isolation;
-- Git/npm updater evidence; and
+- Git/npm updater behavior; and
 - error and security behavior.
 
 Release work treats the approved RPD as an input contract. If implementation or packaging requires changing one of those behaviors, the RPD MUST be revised and approved first.
@@ -198,8 +198,8 @@ PIW uses JSON state and therefore requires no database or native database bindin
 External executables are checked only when relevant:
 
 - `pi` is required for profile launch and launch compatibility checks;
-- `git` is optional and required only for proven Git update candidates; and
-- `npm` is optional at Entry-update time and required only for proven npm update candidates.
+- `git` is optional and required only for Git update phases; and
+- `npm` is optional at Entry-update time and required only for npm update phases.
 
 A missing optional updater executable disables only its related updates and is reported as specified by the RPD.
 
@@ -213,7 +213,7 @@ Preferred form:
 
 ```ts
 spawn("git", ["-C", root, "pull", "--ff-only"]);
-spawn("npm", ["update", packageName], { cwd: installRoot });
+spawn("npm", ["update", "--json"], { cwd: entryRealPath });
 ```
 
 Pi launch is not a child-process supervision flow. It uses `process.execve()` exactly as defined by `RPD.md`.
@@ -314,7 +314,7 @@ npm install -g <package>@latest
     → update the PIW executable
 
 piw update
-    → update conservatively proven registered Entries
+    → run detected Entry-local Git/npm update phases
 ```
 
 Release notes and CLI help MUST preserve this distinction.
@@ -415,17 +415,17 @@ piw --version
 piw --help
 piw list
 piw doctor
-piw <empty-test-profile> -- --version
+piw <test-profile>
 ```
 
 The smoke environment MUST use temporary PIW state or an isolated home directory and MUST NOT read or modify a developer's real `~/.pi/piw/`.
 
-The test MUST additionally confirm:
+The smoke environment MUST provide an isolated fake `pi` executable that supports `pi --version` and captures launch arguments. The test MUST additionally confirm:
 
 - the `piw` command is available on `PATH` without invoking a shell script manually;
 - invalid JSON produces the RPD-defined error behavior;
 - a future schema version is preserved and rejected;
-- the installed executable detects a missing or old Pi version;
+- doctor accepts the fake compatible Pi without depending on the runner's global PATH;
 - a valid launch reaches `process.execve()` with deterministic arguments; and
 - uninstalling the tarball leaves test state and Entry content intact.
 

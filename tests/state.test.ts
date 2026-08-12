@@ -1,8 +1,8 @@
-import {mkdtemp, readFile, writeFile} from "node:fs/promises";
+import {access, mkdtemp, readFile, writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import path from "node:path";
 import {describe, expect, test} from "vitest";
-import {ConcurrentStateError, ensurePiwHome, loadState, saveState, validateState} from "../src/state/state.js";
+import {ConcurrentStateError, ensurePiwHome, getPiwPaths, loadState, saveState, validateState} from "../src/state/state.js";
 import {snapshot} from "../src/app.js";
 
 describe("state", () => {
@@ -17,10 +17,23 @@ describe("state", () => {
   test("initializes missing state without overwriting existing state", async () => {
     const home = await mkdtemp(path.join(tmpdir(), "piw-state-"));
     const paths = await ensurePiwHome(home);
+    expect(paths).toEqual({
+      piwHome: path.join(home, ".pi", "piw"),
+      stateFile: path.join(home, ".pi", "piw", "piw.json"),
+    });
+    await expect(access(path.join(paths.piwHome, "entries"))).rejects.toThrow();
     expect(JSON.parse(await readFile(paths.stateFile, "utf8"))).toEqual({version: 1, profiles: {}});
     await writeFile(paths.stateFile, "{\"version\":1,\"profiles\":{\"x\":{\"entries\":[]}}}\n");
     await ensurePiwHome(home);
     expect((await readFile(paths.stateFile, "utf8"))).toContain('"x"');
+  });
+
+  test("uses the PIW home itself as the Entry root", () => {
+    const home = "/tmp/piw-home-contract";
+    expect(getPiwPaths(home)).toEqual({
+      piwHome: path.join(home, ".pi", "piw"),
+      stateFile: path.join(home, ".pi", "piw", "piw.json"),
+    });
   });
 
   test("refuses to overwrite an externally changed state", async () => {
@@ -36,5 +49,12 @@ describe("state", () => {
     const home = await mkdtemp(path.join(tmpdir(), "piw-readonly-"));
     await expect(snapshot(home, false)).rejects.toThrow();
     await expect(readFile(path.join(home, ".pi", "piw", "piw.json"))).rejects.toThrow();
+  });
+
+  test("rejects state containing invalid UTF-8 bytes", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "piw-invalid-utf8-"));
+    const paths = await ensurePiwHome(home);
+    await writeFile(paths.stateFile, Buffer.concat([Buffer.from('{"version":1,"profiles":{"'), Buffer.from([0xc3, 0x28]), Buffer.from('":{"entries":[]}}}')]));
+    await expect(loadState(paths.stateFile)).rejects.toThrow("valid UTF-8 JSON");
   });
 });

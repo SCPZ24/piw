@@ -45,3 +45,31 @@ test("config asks whether to save, discard, or continue when dirty", async () =>
   await new Promise((resolve) => setTimeout(resolve, 10));
   expect(cancel).toHaveBeenCalledOnce();
 });
+
+test("config cannot newly select an invalid Entry", async () => {
+  const save = vi.fn();
+  const view = render(<ConfigApp initial={{version: 1, profiles: {x: {entries: []}}}} entries={[
+    {id: "bad", registryPath: "/r/bad", realPath: "/r/bad", status: "invalid", diagnostics: [{severity: "error", code: "invalid", message: "bad"}]},
+  ]} onSave={save} onCancel={() => undefined} />);
+  view.stdin.write("\r");
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(view.lastFrame()).toContain("invalid: bad");
+  view.stdin.write(" ");
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  view.stdin.write("s");
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(save).toHaveBeenCalledWith({version: 1, profiles: {x: {entries: []}}});
+});
+
+test("config retains a missing reference and lets the user remove it", async () => {
+  const save = vi.fn();
+  const view = render(<ConfigApp initial={{version: 1, profiles: {x: {entries: ["gone"]}}}} entries={[]} onSave={save} onCancel={() => undefined} />);
+  view.stdin.write("\r");
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(view.lastFrame()).toContain("gone missing");
+  view.stdin.write(" ");
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  view.stdin.write("s");
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(save).toHaveBeenCalledWith({version: 1, profiles: {x: {entries: []}}});
+});

@@ -4,143 +4,124 @@
 >
 > Product name: `piw`
 >
-> Scope: Lightweight profile registry, configurator, validator, updater, and launcher for Pi
+> Scope: Lightweight filesystem-native profile launcher for Pi
 >
-> Product-contract authority: This document is the canonical source for PIW product behavior. `release.md` defines distribution and release policy and MUST reference, not redefine, the behavior specified here.
+> Product-contract authority: This document is the canonical source for PIW product behavior. `release.md` defines distribution and release policy only.
 
 ---
 
 ## 1. Product Summary
 
-`piw` is a lightweight resource registry and profile launcher for Pi.
+PIW is a deliberately small profile launcher for Pi:
 
-It does **not** create or manage an alternative Pi Agent Home. It does **not** own user resources, install missing resources, or act as a package manager.
+```mermaid
+flowchart LR
+    FS[Filesystem] --> Entries[Discover Entries]
+    Entries --> Profiles["Profile = Set&lt;EntryId&gt;"]
+    Profiles --> Validate[Validate basic availability]
+    Validate --> Args[Compile Pi argv]
+    Args --> Exec[execve Pi]
+```
 
-Instead, PIW:
+The filesystem is the source of truth for Entries. `~/.pi/piw/piw.json` is the only PIW-owned persistent file. PIW validates only enough to decide how an Entry must be represented on Pi's command line. Pi remains the final authority on resource semantics.
 
-1. scans a fixed user-managed registry directory for entries;
-2. lets the user compose named profiles from those entries;
-3. validates profile availability before launch;
-4. compiles the selected profile into explicit Pi CLI resource arguments;
-5. replaces itself with Pi; and
-6. updates an entry only when its external Git or npm manager can be proven conservatively.
-
-Core principle:
-
-> **The filesystem is the source of truth for entries. `piw.json` is the source of truth for PIW-owned profile state.**
-
----
+PIW is not another Pi Agent Home, package manager, resource installer, dependency resolver, package provenance system, replacement resource validator, daemon, or supervisor.
 
 ## 2. Goals and Non-Goals
 
-### 2.1 Goals
-
 PIW v0.1 SHALL:
 
-- provide multiple lightweight Pi profiles without duplicating Pi Agent Homes;
-- support extensions, skills, themes, prompt templates, and Pi packages through one `Entry` abstraction;
-- keep registered Entry IDs in one flat, globally unique namespace;
-- compose profiles as deterministic sets of Entry IDs;
-- expose an interactive profile selector and profile configuration TUI;
+- provide named profiles without duplicating Pi Agent Homes;
+- expose extensions, skills, prompt templates, themes, and Pi packages through one flat Entry abstraction;
+- derive every Entry from a user-managed top-level directory below `~/.pi/piw/`;
+- keep profiles as deterministic sets of Entry IDs;
 - keep broken profiles visible while preventing them from launching;
-- launch Pi with automatic discovery disabled for the four resource classes PIW manages;
-- preserve Pi's normal model, authentication, session, tool, project-trust, and context-file behavior;
-- permit non-resource Pi arguments after an explicit `--` separator;
-- update Git and npm entries only when their management scope is provable; and
-- remain a lightweight Unix-style TypeScript CLI distributed through npm.
-
-### 2.2 Non-Goals
+- disable Pi's automatic discovery for PIW-managed resource classes and explicitly load the selected resources;
+- preserve Pi's normal model, authentication, session, tool, project-trust, context-file, environment, working-directory, and stdio behavior;
+- support conservative Entry-local Git and npm updates when explicitly invoked; and
+- replace itself with Pi through `process.execve()`.
 
 PIW v0.1 SHALL NOT:
 
 - replace or redirect `~/.pi/agent`;
-- manage Pi authentication, providers, models, thinking settings, sessions, memory, or `AGENTS.md`;
-- select or persist Pi's current theme;
-- install missing entries, npm packages, or Pi itself;
-- clone Git repositories;
-- copy, vendor, move, rename, or normalize Entry content;
-- maintain a package lock or dependency graph of its own;
-- interpret or filter a Pi package's internal resources;
-- execute extension code as part of validation;
-- guarantee detection of runtime tool, command, or resource collisions inside extensions or packages;
-- support aliases, profile inheritance, profile groups, or project-local profiles;
-- provide machine-readable `list` or `doctor` output; or
+- install, copy, move, rename, delete, repair, normalize, or vendor Entry content;
+- maintain Entry metadata, source metadata, dependency graphs, manager metadata, caches, or last-update state;
+- clone Git repositories or install missing Entries;
+- interpret, expand, validate, or filter the internal resources of a Pi package;
+- execute or import extension code during validation;
+- duplicate Pi's complete skill, prompt, theme, extension, or package validators;
+- select or persist an active theme;
+- provide profile inheritance, aliases, groups, project-local profiles, or machine-readable output;
+- supervise Pi after launch; or
 - update the PIW executable through `piw update`.
-
----
 
 ## 3. Filesystem and Ownership Contract
 
-PIW v0.1 uses exactly this layout:
+PIW v0.1 uses one flat root:
 
 ```text
-~/.pi/
-├── agent/                  # Owned by Pi; PIW never writes here
-└── piw/
-    ├── entries/            # Fixed user-managed registry root
-    └── piw.json            # PIW's only canonical persistent state file
+~/.pi/piw/
+├── piw.json                  # the only PIW-owned persistent file
+├── worktree/                 # Entry ID: worktree
+│   └── index.ts
+├── superpowers/              # Entry ID: superpowers
+│   ├── SKILL.md
+│   └── references/
+├── review/                   # Entry ID: review
+│   └── review.md
+├── tokyo-night/              # Entry ID: tokyo-night
+│   └── tokyo-night.json
+└── frontend-kit/             # Entry ID: frontend-kit
+    ├── package.json
+    ├── extensions/
+    ├── skills/
+    ├── prompts/
+    └── themes/
 ```
 
-The paths are fixed in v0.1:
+Fixed paths:
 
 ```text
-Registry root:  ~/.pi/piw/entries/
-State file:     ~/.pi/piw/piw.json
+PIW home and Entry root: ~/.pi/piw/
+State file:              ~/.pi/piw/piw.json
 ```
 
-PIW MAY create `~/.pi/piw/`, `entries/`, and a minimal `piw.json` on first run. It MUST NOT overwrite an existing state file during initialization.
+There is no intermediate registry layer between the PIW root and its Entries, and no kind-based hierarchy such as `extensions/`, `skills/`, or `packages/` at registry level.
 
-### 3.1 Ownership Boundary
+On first mutating use PIW MAY create `~/.pi/piw/` and a minimal `piw.json`. It MUST NOT create any Entry directory. `piw list` and `piw doctor` are read-only and MUST NOT initialize missing paths or state.
 
-The user or an external manager owns every object registered below `entries/`, including a symlink's target. PIW owns only `piw.json`.
+Everything other than `piw.json` under the root is user-managed. Except for an explicitly requested `piw update`, PIW MUST NOT write Entry content. PIW never writes hidden metadata beside Entries.
 
-During discovery, configuration, validation, diagnosis, and launch, PIW MUST NOT:
+### 3.1 Directory-Only Entries
 
-- rewrite Entry files;
-- move or rename registry items;
-- install Entry dependencies;
-- repair an invalid Entry; or
-- write hidden metadata beside an Entry.
+Every non-hidden top-level directory is an Entry candidate. Entry ID is its basename. Nested objects remain opaque content of that Entry and never become separate Entries.
 
-The sole exception is the explicitly invoked `piw update` operation. After proving an Entry's external manager and management root under Section 12, PIW MAY invoke that manager. The external manager—not PIW—then modifies its own managed content.
+A top-level symbolic link is allowed when it resolves to a directory. PIW MUST:
 
-### 3.2 Symlinks
+- use the symlink basename as the Entry ID;
+- retain the symlink path as `registryPath`;
+- use the resolved absolute target as `realPath` for validation, launch, and update detection;
+- reject broken links, loops, unreadable targets, and links to files; and
+- never mutate or replace the symlink itself.
 
-An immediate child of `entries/` MAY be a symbolic link to any local target, including a target outside `~/.pi/piw/`.
+The reserved `piw.json` file and every name beginning with `.` are ignored by discovery. Any other top-level regular file or unsupported object is not an Entry and is reported by `doctor` as an unsupported root item. Loose resources such as `browser.ts`, `review.md`, and `theme.json` are not supported.
 
-PIW MUST:
-
-- use the link's registry name as the stable Entry ID;
-- resolve the target with `realpath` before validation, launch, or update classification;
-- reject broken links, loops, missing targets, and unreadable targets;
-- show both registry path and resolved target in `doctor`; and
-- use the resolved target—not the link path—to prove Git or npm ownership.
-
----
+The unreleased historical `/entries` layout receives no migration, dual scanning, fallback, or compatibility flag. A top-level directory literally named `entries` is evaluated only as an ordinary Entry candidate.
 
 ## 4. Persistent State Contract
 
-PIW owns exactly one canonical persistent state file:
-
-```text
-~/.pi/piw/piw.json
-```
-
-The v1 schema is conceptually:
+The v1 state schema remains:
 
 ```ts
-type ProfileName = string;
-type EntryId = string;
-
 interface PiwStateV1 {
   version: 1;
-  profiles: Record<ProfileName, {
-    entries: EntryId[];
+  profiles: Record<string, {
+    entries: string[];
   }>;
 }
 ```
 
-The minimal valid file is:
+Minimal state:
 
 ```json
 {
@@ -149,257 +130,196 @@ The minimal valid file is:
 }
 ```
 
-### 4.1 Schema Rules
+Rules:
 
-- The file MUST be UTF-8 JSON; comments are not supported.
-- The top level MUST contain exactly `version` and `profiles`.
-- A profile value MUST contain exactly `entries`.
-- `version` MUST equal `1` for v0.1.
-- An unsupported future version MUST fail safely and MUST NOT be rewritten.
-- Profile names and Entry IDs MUST satisfy their rules in Sections 6 and 7.
-- A profile's Entry IDs MUST be unique and stored in natural ascending order.
-- PIW MUST NOT store Entry paths, Entry kinds, discovery caches, updater metadata, or a last-selected profile.
-- Unknown fields, invalid JSON, invalid types, duplicate logical names, and invalid identifiers MUST produce actionable errors.
+- State is UTF-8 JSON with exactly `version` and `profiles` at top level.
+- A profile has exactly one `entries` array.
+- `version` is exactly `1`; future versions fail safely and are never rewritten.
+- Profile names and Entry IDs match `^[a-z0-9][a-z0-9_-]{0,63}$`.
+- Reserved profile names are `config`, `update`, `list`, `doctor`, `help`, and `version`.
+- Profile Entry IDs are unique and normalized into deterministic natural order.
+- State MUST NOT store Entry paths, kinds, launch paths, source or updater metadata, timestamps, caches, or active theme.
 
-### 4.2 Atomic and Concurrent Writes
+State writes validate and serialize the new value, write and flush a unique temporary file beside `piw.json`, compare the current file fingerprint with the one loaded by the configuration UI, then atomically rename. This is atomic replacement with optimistic stale-write detection, not a database, daemon, mutex, or distributed locking system.
 
-All state mutations MUST use an atomic replacement strategy in the state-file directory:
-
-```text
-serialize and validate new state
-        ↓
-write a unique temporary file
-        ↓
-flush and close
-        ↓
-atomically rename over piw.json
-```
-
-Temporary files are not canonical state.
-
-When `piw config` opens, it MUST retain a fingerprint of the state it loaded. Before saving, it MUST verify that the on-disk file still matches that fingerprint. If an external edit occurred, PIW MUST refuse to overwrite it and instruct the user to reopen the configuration TUI.
-
----
-
-## 5. Core Entry Model
-
-PIW exposes one user-facing abstraction:
+## 5. Runtime Entry Model
 
 ```ts
 type EntryKind = "extension" | "skill" | "prompt" | "theme" | "package";
 
-interface Entry {
-  id: EntryId;
-  kind: EntryKind;
+interface EntryBase {
+  id: string;
   registryPath: string;
   realPath: string;
-  status: "valid" | "invalid";
-  diagnostics: string[];
+  diagnostics: Diagnostic[];
 }
-```
 
-This is a conceptual runtime model, not persistent state.
-
-A loose resource and a Pi package are both Entries. A package remains one opaque, indivisible Entry even when it contains several extensions, skills, prompts, and themes.
-
-The registry is logically flat:
-
-```text
-worktree
-superpowers
-browser
-review
-dark-theme
-frontend-kit
-```
-
-It is not a kind-based hierarchy such as `skills/superpowers` or `packages/frontend-kit`.
-
----
-
-## 6. Entry Discovery and IDs
-
-PIW scans only the immediate, non-hidden children of:
-
-```text
-~/.pi/piw/entries/
-```
-
-Nested files belong to their immediate top-level Entry and MUST NOT become additional registry Entries.
-
-### 6.1 Entry ID Format
-
-Entry IDs MUST match:
-
-```regex
-^[a-z0-9][a-z0-9_-]{0,63}$
-```
-
-Rules:
-
-- IDs contain only lowercase ASCII letters, digits, `-`, and `_`.
-- IDs are 1–64 characters.
-- Directory and symlink IDs are their immediate registry item names.
-- A supported standalone file removes exactly one supported extension: `review.md` becomes `review`.
-- Hidden registry items are ignored.
-- IDs share one global namespace across all kinds.
-- Uniqueness MUST be checked case-insensitively even on a case-sensitive filesystem.
-- An invalid registry name is an invalid candidate and MUST be reported by `doctor`.
-
-For example, these candidates conflict:
-
-```text
-browser.ts
-browser/
-Browser.js
-```
-
-No conflicted candidate is usable until the user resolves the registry names.
-
-### 6.2 File Classification
-
-Supported standalone files classify as follows:
-
-| File form | Kind | Minimum validation |
-|---|---|---|
-| `*.ts`, `*.js` | `extension` | Existing readable regular file |
-| `*.md` | `prompt` | Existing readable UTF-8 Markdown file |
-| `*.json` | `theme` | Parseable JSON satisfying the theme rules below |
-
-Other standalone extensions are invalid.
-
-### 6.3 Directory Classification
-
-Directories use strong signals first:
-
-1. An effective Pi package signal classifies the directory as `package`:
-   - a valid `package.json` containing a `pi` manifest; or
-   - one or more Pi convention directories named `extensions/`, `skills/`, `prompts/`, or `themes/`.
-2. Otherwise, a root `SKILL.md` classifies it as `skill`.
-3. Otherwise, a root `index.ts` or `index.js` classifies it as `extension`.
-4. Otherwise, the directory is invalid.
-
-A package MUST resolve, through its manifest or convention directories, to at least one supported resource. Missing manifest targets, paths that escape the package root, or invalid declared structures invalidate the package.
-
-If there is no package signal and incompatible weak signals coexist—for example both root `SKILL.md` and root `index.ts`—PIW MUST mark the Entry invalid rather than guess.
-
-For a `skill`, `SKILL.md` MUST be readable UTF-8 Markdown with YAML frontmatter containing non-empty `name` and `description` strings. A missing description makes the Entry invalid because Pi will not load it. Other Agent Skills conformance issues that Pi treats as warnings—such as a non-standard name—remain warnings rather than making the Entry unavailable.
-
-For a `theme`, the JSON MUST contain a non-empty string `name` without `/`, an optional object `vars`, and an object `colors`. `colors` MUST contain every color token required by Pi 0.84.1's public theme schema. `scrollbarThumb` and `thinkingMax` are optional because Pi defines fallbacks for them. Every supplied color value and variable reference MUST satisfy that schema. PIW SHOULD keep the token list in one versioned validation constant so the compatibility tests in `release.md` can detect upstream schema drift.
-
-### 6.4 Validation Boundary
-
-PIW performs only structural validation needed to produce a safe launch argument.
-
-PIW MUST NOT:
-
-- execute an extension during validation;
-- reproduce Pi's full package loader;
-- deeply analyze extension source; or
-- promise to detect every internal command, tool, theme, prompt, or skill collision.
-
-PIW MAY emit warnings for collisions visible through static metadata. Pi remains the final authority on runtime loading and internal resource collisions.
-
----
-
-## 7. Profile Contract
-
-A profile is a named set of Entry IDs:
-
-```ts
-interface Profile {
-  name: string;
-  entries: EntryId[];
+interface ValidEntry extends EntryBase {
+  status: "valid";
+  kind: EntryKind;
+  launchPath: string;
 }
-```
 
-Example:
-
-```json
-{
-  "name": "builder",
-  "entries": [
-    "browser",
-    "dark-theme",
-    "review",
-    "superpowers",
-    "worktree"
-  ]
+interface InvalidEntry extends EntryBase {
+  status: "invalid";
+  kind?: EntryKind;
+  launchPath?: string;
 }
+
+type Entry = ValidEntry | InvalidEntry;
 ```
 
-### 7.1 Profile Names
+This model is reconstructed from the live filesystem and never persisted. A package is one opaque Entry even when it contains many Pi resources.
 
-Profile names use the same format as Entry IDs:
+Entry IDs share one flat namespace, are checked case-insensitively for collisions, and use the directory or symlink basename without transformation. Every colliding candidate is invalid.
 
-```regex
-^[a-z0-9][a-z0-9_-]{0,63}$
+## 6. Discovery and Classification
+
+PIW resolves each candidate to a directory and applies this precedence:
+
+```mermaid
+flowchart TD
+    Resolve[Resolve Entry directory] --> Package{Explicit Pi package signal?}
+    Package -- Yes --> P[Package]
+    Package -- No --> Loose[Inspect canonical loose-resource signals]
+    Loose --> Count{Exactly one kind?}
+    Count -- Yes --> Basic[Minimal kind validation]
+    Count -- Multiple --> Ambiguous[Invalid: ambiguous Entry]
+    Count -- None --> Unclassified[Invalid: unclassified Entry]
 ```
 
-They MUST be globally unique and MUST NOT equal a reserved CLI word. The complete v0.1 reserved-name set is:
+### 6.1 Package Entry
+
+Canonical form:
 
 ```text
-config
-update
-list
-doctor
-help
-version
+frontend-kit/
+├── package.json
+├── extensions/
+├── skills/
+├── prompts/
+└── themes/
 ```
 
-### 7.2 Membership and Ordering
+A package signal is either:
 
-- Profiles reference Entries only by ID.
-- Profiles MUST NOT contain Entry paths or Entry definitions.
-- An Entry ID appears at most once in a profile.
-- Membership is a set; user-controlled ordering has no semantic meaning.
-- PIW stores, displays, validates, and compiles membership by the deterministic ASCII natural order defined below.
-- An empty profile is valid. It represents a clean resource mode with all four managed discovery classes disabled and no registered Entry explicitly loaded.
-- A package can be selected only as a whole in v0.1.
+- a parseable `package.json` whose `pi` value is a non-null, non-array object; or
+- at least one actual directory named `extensions`, `skills`, `prompts`, or `themes`.
 
-### 7.3 Availability
+Package signal has precedence over all loose-resource signals. `package.json` alone is not a package signal because an ordinary extension or other Entry may use npm dependencies.
 
-A profile is structurally available only when every referenced Entry exists, has a unique valid ID, resolves successfully, and passes kind-specific structural validation.
+Once a package signal exists, PIW classifies the directory as `package` and stops. It MUST NOT expand manifest arrays, evaluate globs or exclusions, resolve targets, check target existence, inspect internal resources, or reproduce Pi's package loader. Convention directories need not be non-empty. Pi is the only authority on package semantics.
 
-A profile with missing or invalid Entries MUST:
-
-- remain visible;
-- appear unavailable;
-- expose the reasons;
-- reject launch; and
-- retain its invalid references until the user removes them or the Entries become valid again.
-
-Structural availability is not a trust guarantee and does not guarantee that extension initialization will succeed inside Pi.
-
-### 7.4 Deterministic Natural Order
-
-Whenever this document requires natural ascending order, PIW compares ASCII identifiers as follows:
-
-1. split each identifier into maximal digit and non-digit runs;
-2. compare digit runs as base-10 integers;
-3. compare non-digit runs by Unicode code point, which is ASCII order for the permitted identifier alphabet;
-4. if corresponding runs are equal, the identifier with fewer remaining runs sorts first; and
-5. use the complete identifier's code-point order as the final tie-breaker.
-
-For example:
+Launch target:
 
 ```text
-profile-2
-profile-10
-profile_a
+-e <absolute-entry-realpath>
 ```
 
-### 7.5 Theme Semantics
+### 6.2 Extension Entry
 
-A selected theme Entry makes that theme resource available to Pi for the run. It does not select the current theme.
+Canonical form:
 
-PIW MUST NOT write Pi's settings or add an `activeTheme` field to a profile. Theme selection remains Pi's responsibility.
+```text
+worktree/
+├── index.ts                 # or index.js, not both
+├── package.json             # optional dependency metadata
+├── node_modules/            # optional
+└── arbitrary supporting files
+```
 
----
+Minimal validation requires exactly one readable regular root file named `index.ts` or `index.js`. PIW does not execute or import it. `package.json` does not change the kind unless it contains a Pi package manifest.
 
-## 8. Required CLI Surface
+Launch target:
 
-PIW v0.1 MUST provide:
+```text
+-e <absolute-entry-realpath>/index.ts
+```
+
+or `index.js`. PIW MUST NOT pass the directory, because Pi interprets a local directory using package rules.
+
+### 6.3 Skill Entry
+
+Canonical form:
+
+```text
+superpowers/
+├── SKILL.md
+├── references/
+├── scripts/
+├── assets/
+└── arbitrary supporting files
+```
+
+Minimal validation requires a readable UTF-8 regular root `SKILL.md` with YAML frontmatter containing non-empty string `name` and `description`. Unknown or optional metadata is ignored. Supporting files remain opaque and in place so relative references keep working. PIW does not implement the complete Agent Skills validator.
+
+Launch target:
+
+```text
+--skill <absolute-entry-realpath>
+```
+
+### 6.4 Prompt Template Entry
+
+Canonical form:
+
+```text
+review/
+└── review.md
+```
+
+The required filename is `<entry-id>.md`, preserving the Pi command-name relationship. Minimal validation requires a readable UTF-8 regular Markdown file. Optional frontmatter and prompt syntax remain Pi's concern.
+
+Launch target:
+
+```text
+--prompt-template <absolute-entry-realpath>/<entry-id>.md
+```
+
+### 6.5 Theme Entry
+
+Canonical form:
+
+```text
+tokyo-night/
+└── tokyo-night.json
+```
+
+The required filename is `<entry-id>.json`. Minimal validation requires parseable UTF-8 JSON with an object at top level, a non-empty string `name`, and an object `colors`. PIW does not maintain Pi's token table, validate every color value, or validate variable references.
+
+Launch target:
+
+```text
+--theme <absolute-entry-realpath>/<entry-id>.json
+```
+
+Selecting a theme Entry makes it available; it does not activate it. PIW never modifies Pi settings or adds active-theme profile state.
+
+### 6.6 Ambiguity and UTF-8
+
+Without a package signal, the loose-resource signals are `SKILL.md`, `index.ts`/`index.js`, `<id>.md`, and `<id>.json`. Multiple different kinds are invalid. Both `index.ts` and `index.js` are also invalid. No recognizable signal is invalid.
+
+Text validation uses fatal UTF-8 decoding. PIW asks only whether it can confidently determine the CLI representation; deeper legality remains Pi's responsibility.
+
+## 7. Profiles and TUI
+
+A profile is only a named set of Entry IDs. Membership has no user-controlled ordering and is normalized using deterministic ASCII natural order. Empty profiles are valid and represent a clean Pi resource mode.
+
+A profile is available only when every referenced ID resolves to a valid Entry. Missing and invalid references:
+
+- remain visible in the selector and configuration UI;
+- make the profile unavailable;
+- expose diagnostics;
+- prevent launch; and
+- remain stored until deliberately removed or made valid again.
+
+The profile selector preserves natural ordering, Up/Down navigation, Enter for an available profile, and `q`/Escape cancellation. Unavailable profiles are dimmed and explain their diagnostics.
+
+The configuration TUI preserves profile create, rename, confirmed delete, and Entry membership multi-select. It writes only `piw.json`. Invalid Entries cannot be newly selected; previously referenced missing or invalid IDs remain visible and removable.
+
+## 8. CLI and Launch Contract
+
+Required commands:
 
 ```text
 piw
@@ -414,140 +334,9 @@ piw --help
 piw --version
 ```
 
-### 8.1 Command Behavior
+Interactive selector and configuration commands require a TTY. `list` and `doctor` are read-only. Exit `0` means success or doctor warnings only, exit `1` means operational/validation/update failure, and exit `2` means CLI usage error.
 
-| Command | Required behavior |
-|---|---|
-| `piw` | Validate profiles, open selector, and exec Pi after selection |
-| `piw -- <pi-args...>` | Open selector, then launch with allowed Pi arguments |
-| `piw <profile>` | Validate and directly launch the named profile |
-| `piw <profile> -- <pi-args...>` | Directly launch and append allowed Pi arguments |
-| `piw config` | Open profile configuration TUI |
-| `piw update` | Immediately update conservatively proven Git/npm Entries |
-| `piw list` | Print human-readable Entries and profiles without mutation |
-| `piw doctor` | Print read-only diagnostics without launching Pi |
-| `piw --help` | Print PIW usage |
-| `piw --version` | Print PIW version |
-
-`piw list` output MUST be deterministically ordered and show Entry ID, kind, status, and registry path, followed by each profile's sorted membership and availability.
-
-`piw doctor` MUST check at least:
-
-- state existence, JSON validity, and schema version;
-- registry-name validity and collisions;
-- symlink resolution;
-- Entry classification and structural validity;
-- profile references and availability;
-- `pi` presence and compatible version; and
-- `git`/`npm` presence and updater classification where relevant.
-
-### 8.2 Exit Codes
-
-| Exit code | Meaning |
-|---|---|
-| `0` | Command completed successfully, or `doctor` found warnings only |
-| `1` | State, discovery, profile, compatibility, launch, or attempted update failure |
-| `2` | CLI usage or argument error |
-
-For `piw update`, unmanaged Entries and conservative safety skips are not attempted-update failures. A nonzero manager command is a failure. The command exits `1` if at least one attempted update fails, while continuing all unrelated updates.
-
-### 8.3 TTY Requirements
-
-`piw` selector and `piw config` require an interactive terminal. In a non-TTY context PIW MUST fail with guidance to use `piw <profile>` for direct launch or a read-only command for inspection.
-
----
-
-## 9. Profile Selector TUI
-
-Running `piw` with no profile opens an explicit selector:
-
-```text
-Select Pi Profile
-
-> builder          ready
-  minimal          ready
-  researcher       unavailable
-  reviewer         ready
-```
-
-Required interaction:
-
-- Up/Down move the highlight.
-- Enter launches the highlighted profile only when available.
-- Escape or `q` exits without launching.
-- Profiles sort by natural ascending name.
-- The initial highlight is the first available profile.
-- If none are available, the first row may be highlighted for diagnosis, but Enter MUST NOT launch it.
-- The UI MUST show missing/invalid Entry reasons for the highlighted unavailable profile.
-
-If no profiles exist, `piw` initializes missing PIW-owned state as needed, prints:
-
-```text
-No profiles are configured. Run `piw config` to create one.
-```
-
-and exits `1`. PIW MUST NOT create a default profile automatically.
-
----
-
-## 10. Profile Configuration TUI
-
-`piw config` opens a profile list and supports:
-
-- create;
-- inspect;
-- rename;
-- delete with explicit confirmation; and
-- add/remove Entries through multi-select.
-
-Profile detail example:
-
-```text
-builder
-
-[x] browser             extension
-[x] dark-theme          theme
-[!] old-review          missing: referenced by profile
-[ ] research            skill
-[x] superpowers         package
-
-Space toggle  S save  Esc back
-```
-
-Rules:
-
-- Valid Entries can be toggled with Space.
-- Invalid discovered candidates remain visible with their reason but cannot be newly selected.
-- Missing or invalid IDs already referenced by the profile remain visible and can be removed deliberately.
-- Changes are staged in memory.
-- `s` explicitly validates and saves all staged changes atomically.
-- Exiting with unsaved changes prompts: save, discard, or continue editing.
-- A deletion requires a second confirmation.
-- A save MUST reject invalid profile names, reserved names, duplicates, invalid Entry IDs, and concurrent external state changes.
-- Configuration changes update only `piw.json`; they never modify Entries.
-
----
-
-## 11. Launch Contract
-
-The launch path is:
-
-```mermaid
-flowchart TD
-    A[Read and validate piw.json] --> B[Discover and classify Entries]
-    B --> C[Resolve selected Profile IDs]
-    C --> D{Every reference valid?}
-    D -- No --> E[Show diagnostics and exit 1]
-    D -- Yes --> F[Resolve pi executable and require version >= 0.84.1]
-    F --> G[Compile deterministic Pi argv]
-    G --> H[Append permitted pass-through arguments]
-    H --> I[process.execve Pi]
-    I --> J[Pi replaces PIW with same PID cwd env and stdio]
-```
-
-### 11.1 Resource Isolation
-
-Every profile launch MUST begin Pi's resource arguments with:
+Every profile launch starts with:
 
 ```text
 --no-extensions
@@ -556,27 +345,17 @@ Every profile launch MUST begin Pi's resource arguments with:
 --no-themes
 ```
 
-This disables automatic discovery only for the four resource classes PIW manages. PIW MUST NOT add `--no-context-files` and MUST NOT alter Pi's model, authentication, session, provider, built-in tool, or project-trust behavior.
+Then valid Entries are emitted in natural ID order:
 
-### 11.2 Entry Argument Compilation
-
-After the four isolation flags, PIW processes Entries by natural ascending ID:
-
-| Entry kind | Pi arguments |
+| Kind | Pi arguments |
 |---|---|
-| `extension` | `-e <absolute-real-path>` |
-| `skill` | `--skill <absolute-real-path>` |
-| `prompt` | `--prompt-template <absolute-real-path>` |
-| `theme` | `--theme <absolute-real-path>` |
-| `package` | `-e <absolute-package-root>` |
+| extension | `-e <entry>/index.ts\|index.js` |
+| skill | `--skill <entry-directory>` |
+| prompt | `--prompt-template <entry>/<id>.md` |
+| theme | `--theme <entry>/<id>.json` |
+| package | `-e <entry-directory>` |
 
-Pi itself expands an explicitly supplied local package root using its package manifest or conventional directories. PIW MUST NOT expand or filter the package.
-
-### 11.3 Pi Argument Pass-Through
-
-Only arguments after an explicit `--` are passed to Pi. They are appended after PIW's generated resource arguments.
-
-PIW MUST reject any pass-through resource option, including separated, short, and `--option=value` forms:
+Arguments after an explicit `--` are appended exactly without shell parsing, except PIW rejects all resource-set overrides:
 
 ```text
 -e
@@ -593,330 +372,155 @@ PIW MUST reject any pass-through resource option, including separated, short, an
 --no-themes
 ```
 
-All other Pi arguments and initial messages are passed as an exact argument array without shell parsing. This permits options such as model, provider, session, tools, trust, and offline mode while preserving the profile as the sole resource-set authority.
+PIW resolves `pi` from `PATH`, executes `pi --version`, and requires at least `0.84.1`. It then calls `process.execve()` with the absolute Pi executable, `['pi', ...compiledArgs]`, and the current environment. PIW does not use a shell, change cwd, replace stdio, spawn a supervisor, or fall back to supervision.
 
-### 11.4 Process Replacement
+## 9. Entry Update Contract
 
-PIW MUST resolve `pi` through `PATH`, obtain its absolute executable path, and verify `pi --version` is at least `0.84.1` before launch.
+`piw update` is an explicit user-authorized mutation of valid Entry directories. Detection is recomputed from the current filesystem and stored nowhere.
 
-PIW then MUST call Node's `process.execve()` with:
-
-- the absolute Pi executable path;
-- an argument vector whose first element is the program name `pi`, followed by the compiled arguments;
-- the current environment; and
-- inherited current working directory and standard file descriptors.
-
-Conceptually:
-
-```ts
-const argv = ["pi", ...generatedResourceArgs, ...permittedPassthroughArgs];
-process.execve(piAbsolutePath, argv, process.env);
-```
-
-PIW MUST NOT invoke a shell and MUST NOT remain as a supervisor process. Successful replacement preserves the PID and gives Pi direct ownership of signals and final exit status.
-
-If the path is not executable or `execve` returns an error, PIW MUST print an actionable error and exit `1`. It MUST NOT silently fall back to `spawn`.
-
----
-
-## 12. Entry Update Contract
-
-`piw update` is an explicit user-authorized mutation of externally managed Entry content. It starts immediately without a preview confirmation or `--yes` requirement.
-
-PIW first scans and classifies all valid Entries, then performs updates sequentially. Detection is mutually exclusive:
+An Entry has zero, one, or two ordered phases:
 
 ```mermaid
 flowchart TD
-    A[Valid Entry realpath] --> B{realpath equals Git worktree root?}
-    B -- Yes --> C{Clean branch with upstream?}
-    C -- Yes --> D[git pull --ff-only]
-    C -- No --> S[Safe skip with reason]
-    B -- No --> E{Exact direct node_modules dependency?}
-    E -- No --> U[Unmanaged]
-    E -- Yes --> F{Root manifest lockfile and package identity agree?}
-    F -- No --> U
-    F -- Yes --> G[npm update package-name in install root]
+    Entry[Valid Entry realPath] --> Git{Entry itself is Git root?}
+    Entry --> Npm{Root package.json exists?}
+    Git -- Yes --> G[Git phase]
+    Npm -- Yes --> N[npm phase]
+    Git -- No --> None{Any phase?}
+    Npm -- No --> None
+    None -- No --> U[local unmanaged]
+    G --> Safe{Git completed safely?}
+    Safe -- Yes --> N
+    Safe -- No --> Skip[npm skipped]
 ```
 
-One Entry receives at most one update strategy per run. A false negative is acceptable; a false positive is not.
+### 9.1 Git Detection and Update
 
-### 12.1 Git-Managed Entries
+With Git available, PIW runs `git -C <entry> rev-parse --show-toplevel` and requires the resolved result to equal Entry `realPath`. This supports normal repositories and linked worktrees whose `.git` is a file. A subdirectory of a larger repository is not Git-managed by PIW.
 
-An Entry is Git-managed only when its resolved real path is exactly the Git worktree root.
+When Git is unavailable but a root `.git` file or directory exists, PIW still reports a Git phase as skipped because Git is missing.
 
-An Entry that points to a subdirectory of a larger repository is not Git-managed by PIW because updating it would mutate content beyond the registered Entry boundary.
-
-Before updating, PIW MUST establish all of the following:
-
-- `git` is available;
-- the real path is a worktree root;
-- the worktree is clean, including tracked and untracked changes;
-- HEAD is attached to a branch; and
-- the branch has an upstream.
-
-The only update command is equivalent to this argument-array invocation:
+Before mutation PIW requires a clean worktree, attached HEAD, and upstream. Dirty state, detached HEAD, missing upstream, or missing Git is a safe skip. The only mutation is:
 
 ```text
-git -C <worktree-root> pull --ff-only
+git -C <entry-realpath> pull --ff-only
 ```
 
-PIW MUST NOT merge, rebase, stash, reset, clean, discard modifications, change branches, or create commits.
+PIW never stashes, resets, cleans, checks out, merges, rebases, or forces. HEAD before/after determines `updated` versus `up-to-date`. Inspection errors and nonzero pull results are failures.
 
-Dirty state, detached HEAD, missing upstream, or missing Git causes a safe skip with an explicit reason. A pull that was attempted and returned nonzero is a failure.
+### 9.2 npm Detection and Update
 
-Before a pull, PIW records the worktree's HEAD commit. After a successful pull it reads HEAD again. A changed commit is `updated`; an unchanged commit is `up-to-date`. If HEAD cannot be read after the command, the attempted update is `failed` even when Git returned zero.
+A root regular `package.json` is the complete npm signal. PIW does not prove install provenance, inspect node_modules, locate a parent install root, parse package identity, or require a lockfile.
 
-If multiple registered symlinks resolve to the same Git root, PIW updates that real root once and maps the shared result to every associated Entry.
-
-### 12.2 npm-Managed Entries
-
-The existence of `package.json` alone never proves npm management.
-
-PIW v0.1 recognizes only a top-level direct dependency installed in one of these exact forms:
+Immediately before npm mutation PIW rechecks that root `package.json` still exists as a regular file. The command is:
 
 ```text
-<install-root>/node_modules/<name>
-<install-root>/node_modules/@scope/<name>
-```
-
-All of the following evidence is required:
-
-1. `<install-root>/package.json` exists and parses.
-2. `<install-root>/package-lock.json` exists, parses, and uses lockfile v2 or v3 with a `packages` map.
-3. The package key appears in root `dependencies`, `devDependencies`, or `optionalDependencies`.
-4. The Entry's own `package.json#name` equals the dependency key and node_modules path.
-5. `package-lock.json` contains the matching `packages["node_modules/<name>"]` record; its non-empty `version` equals the installed package's `package.json#version`, and its `link` field is not `true`.
-6. The Entry registry item and installed package directory resolve to the same real path, and that installed package directory is not itself a symbolic link. This excludes npm workspaces and linked packages.
-
-The following are unmanaged in v0.1:
-
-- transitive or nested dependencies;
-- npm aliases;
-- workspace symlinks;
-- package-lock v1 or lockfiles without a verifiable `packages` record;
-- Entries merely containing a `package.json`; and
-- any layout whose install root or package identity is ambiguous.
-
-The only npm update is equivalent to:
-
-```text
-cwd: <install-root>
+cwd: <entry-realpath>
 command: npm
-args: ["update", "<package-name>"]
+args: ["update", "--json"]
 ```
 
-PIW MUST use an argument array, never shell interpolation. Missing npm causes a safe skip. A command that is attempted and returns nonzero is a failure.
+Successful JSON `added`, `removed`, and `changed` counts distinguish `updated` from `up-to-date`. A successful command with unparseable output is conservatively reported as `updated`. Missing npm is a safe skip; a nonzero command is a failure.
 
-Duplicate `(installRoot, packageName)` pairs update once. Different direct dependencies sharing an install root update sequentially by Entry ID.
+### 9.3 Combined Phases and Isolation
 
-Before an attempted npm update, PIW records the installed package's `package.json#version` and its matching lockfile package record. After a successful command it reads them again. If either value changed, the outcome is `updated`; if both are unchanged, the outcome is `up-to-date`. If the post-update evidence can no longer be read or validated, the attempted update is `failed` even when npm returned zero.
+Git and npm may both apply to one Entry. Git always runs first. npm runs only after Git reports `updated` or `up-to-date`. A skipped or failed Git phase causes the npm phase to be skipped with `git phase did not complete safely`.
 
-### 12.3 Output and Failure Isolation
+Different Entries remain failure-isolated and execute in deterministic order. Multiple Entry aliases resolving to the same real path reuse the same phase result, so a shared Git root or npm root mutates once per run.
 
-Each Entry receives one of:
+Output groups results per Entry and can show:
 
 ```text
-updated
-up-to-date
-skipped: <reason>
-unmanaged
-failed: <reason>
+worktree
+  git   updated
+  npm   up-to-date
+
+superpowers
+  git   skipped: dirty working tree
+  npm   skipped: git phase did not complete safely
+
+review
+  local unmanaged
 ```
 
-Example:
+Unmanaged and safe skips do not make `piw update` fail. Any attempted manager failure makes the command exit `1` after unrelated Entries have still been processed.
 
-```text
-Updating PIW entries
+## 10. Doctor Contract
 
-✓ browser-tools   npm    updated
-- dark-theme      local  unmanaged
-! superpowers     git    skipped: dirty working tree
-✓ worktree        git    up-to-date
+`piw doctor` is a lightweight, read-only inspection that does not require a successful normal snapshot before it can report problems. It checks at least:
 
-Updated:     1
-Up-to-date:  1
-Skipped:     1
-Unmanaged:   1
-Failed:      0
-```
+- PIW home and `piw.json` existence/type;
+- UTF-8 JSON validity and supported schema version;
+- unsupported root items;
+- Entry ID validity and case-insensitive collisions;
+- symlink resolution to a directory;
+- classification and minimal resource structure;
+- profile references and availability when state is valid;
+- Pi executable presence and minimum version;
+- Git and npm command presence; and
+- each valid Entry's update phases, displayed as `git`, `npm`, `git+npm`, or `unmanaged`.
 
-One failure MUST NOT abort unrelated updates. Summary counts MUST exactly match the per-Entry outcomes.
+Missing or incompatible Pi, invalid state, root violations, invalid Entries, and unavailable profiles are errors. Missing optional Git/npm executables are warnings and do not alone make doctor exit nonzero. Doctor never pulls, updates dependencies, initializes state, writes files, or repairs anything.
 
-PIW stores no manager metadata. It recomputes all ownership evidence from the real filesystem on every run.
+## 11. Security and Error Model
 
----
+Pi extensions execute with the user's permissions, skills can instruct an agent to perform arbitrary actions, and npm/Git update commands can execute manager-defined behavior. PIW is not a sandbox or trust verifier.
 
-## 13. Error and Diagnostic Contract
+PIW uses direct argument arrays without shell interpolation, never downloads missing resources during discovery or launch, never executes Entry code during validation, preserves Pi project-trust behavior, and fails visibly when classification or launch representation is ambiguous.
 
-PIW MUST fail visibly and conservatively.
+## 12. Product Invariants
 
-Representative messages:
+1. `~/.pi/piw/piw.json` is PIW's only canonical persistent file.
+2. Every non-hidden top-level directory is an Entry candidate; Entries are never loose files.
+3. Entry ID is the top-level directory or symlink basename.
+4. Profiles contain only Entry IDs.
+5. Entry registry state is reconstructed from the filesystem on every run.
+6. Package signal has precedence and package internals remain opaque.
+7. Validation stops once PIW can confidently choose the Pi CLI argument.
+8. A broken profile remains visible but cannot launch.
+9. Empty profiles are valid and use the four isolation flags.
+10. Themes are made available, not activated.
+11. Pass-through arguments cannot override the profile resource set.
+12. PIW replaces itself with Pi and disappears.
+13. Git and npm update phases are independent but ordered for safety.
+14. PIW stores no updater or provenance metadata.
+15. Pi remains final authority on all Pi resource semantics.
 
-```text
-Profile "builder" cannot start.
+## 13. Acceptance Scenarios
 
-Missing entries:
-  - browser
-```
+Conformance requires at least:
 
-```text
-Entry "foo" could not be classified safely.
-Found both SKILL.md and index.ts without a Pi package signal.
-```
+1. First mutating use creates only the PIW root and minimal state, preserving existing content.
+2. `list` and `doctor` do not initialize missing state.
+3. `piw.json` and hidden items never become Entries.
+4. A loose root file is diagnosed and never classified as an Entry.
+5. Canonical extension, skill, prompt, theme, and package directories compile to the specified arguments.
+6. Extension plus ordinary `package.json` remains an extension.
+7. A package manifest containing globs or exclusions classifies without target resolution.
+8. A convention directory classifies its root as one package Entry.
+9. Multiple loose kinds and dual extension entrypoints are invalid.
+10. Symlink-to-directory preserves registry basename as ID; symlink-to-file is invalid.
+11. Missing/invalid references remain visible and removable.
+12. An empty profile launches only with the four isolation flags.
+13. Resource pass-through overrides exit `2`; non-resource arguments remain exact.
+14. Git-only, npm-only, and Git+npm Entries run the correct phases.
+15. Dirty, detached, or no-upstream Git prevents npm mutation for that Entry.
+16. A Git subdirectory never pulls the parent repository.
+17. One Entry failure does not stop later Entries.
+18. Doctor reports missing Pi as an error but optional missing managers as warnings.
+19. Smoke tests use an isolated fake Pi and verify the exact extension argv.
+20. Successful launch uses `process.execve()` rather than supervision.
 
-```text
-PIW state version 3 is newer than this release supports.
-Upgrade PIW before modifying this state file.
-```
-
-```text
-PIW cannot launch because `pi` was not found on PATH.
-Install Pi separately and retry.
-```
-
-```text
-PIW requires Pi >=0.84.1; found 0.83.0.
-```
-
-```text
-superpowers: update skipped
-Reason: Git working tree contains local changes.
-```
-
-Diagnostics MUST identify the affected profile or Entry and state what the user can do next. Ambiguity causes invalidation or a skip, never a guessed mutation.
-
----
-
-## 14. Security Model
-
-Pi extensions execute with the user's permissions, and skills may instruct a model to perform arbitrary actions. PIW is not a sandbox or trust verifier.
-
-PIW MUST:
-
-- show the resolved Entry set before launch where practical;
-- never silently download or install missing resources;
-- never execute Entry code during validation;
-- never execute updater logic without strict manager proof;
-- avoid shell interpolation for Pi, Git, and npm commands;
-- treat profile validation as structural availability, not trust verification; and
-- preserve Pi's own project-trust behavior.
-
-The user remains responsible for trusting registered resources.
-
----
-
-## 15. Product Invariants
-
-The following are fixed PIW v0.1 invariants:
-
-1. One unified user-facing `Entry` abstraction.
-2. One flat, case-insensitively unique Entry ID namespace.
-3. Fixed Entry root: `~/.pi/piw/entries/`.
-4. One canonical PIW state file: `~/.pi/piw/piw.json`.
-5. Profiles contain only deterministic sets of Entry IDs.
-6. The filesystem is the source of truth for Entry content and structure.
-7. PIW owns no Entry content and installs no missing resources.
-8. PIW never creates an alternative Pi Agent Home.
-9. A broken profile remains visible but cannot launch.
-10. An empty profile is valid and disables all four managed discovery classes.
-11. Package internals are opaque and an entire package is one Entry.
-12. Profiles control theme availability, not active-theme selection.
-13. Launch compiles explicit resource arguments and rejects pass-through resource overrides.
-14. PIW replaces itself with Pi through `process.execve()`.
-15. Updater detection is automatic, mutually exclusive, conservative, and stateless.
-16. Git updates apply only when the Entry real path is the repository root.
-17. npm updates apply only to lockfile-proven top-level direct dependencies.
-18. Ambiguity causes invalidation or skip, never guessing.
-19. `piw update` updates Entries, never PIW itself.
-20. Pi remains the final authority on runtime package and extension semantics.
-
----
-
-## 16. Acceptance Scenarios
-
-An implementation is conformant only if it satisfies at least these scenarios:
-
-1. First run creates missing PIW-owned paths and minimal state without overwriting existing files.
-2. With no profiles, `piw` directs the user to `piw config` and returns `1`.
-3. An empty profile launches with the four isolation flags and no Entry arguments.
-4. The selector sorts profiles, supports Up/Down and Enter, and refuses unavailable profiles.
-5. `piw builder -- --model provider/model "hello"` preserves the permitted Pi argument array.
-6. Pass-through `-e`, `--skill`, `--theme`, or another managed resource option is rejected with exit `2`.
-7. Every loose Entry kind compiles to its specified Pi flag.
-8. A package compiles to one `-e <root>` and PIW does not expand its contents.
-9. A theme Entry becomes available without PIW modifying Pi's active theme.
-10. A symlink uses its registry name as ID and may target a path outside the PIW root.
-11. A broken symlink is invalid and makes referencing profiles unavailable.
-12. Case-insensitive Entry ID collisions invalidate the candidates on macOS and Linux.
-13. Missing and invalid references remain in state until deliberately removed.
-14. An external edit during `piw config` prevents overwrite on save.
-15. Two Entry links to one Git root cause one pull operation.
-16. Git subdirectories, dirty repositories, detached HEADs, and branches without upstream are skipped.
-17. A normal Git project containing `package.json` is not mistaken for an npm-installed Entry.
-18. Only a direct lockfile-proven node_modules dependency receives `npm update <name>`.
-19. npm aliases, workspace links, transitive dependencies, and unverifiable lockfiles are unmanaged.
-20. One attempted update failure does not stop other Entries, and output counts remain exact.
-21. A missing or old Pi executable blocks launch with an actionable error.
-22. Successful launch replaces PIW with Pi instead of retaining a supervisor.
-23. A package-internal runtime collision may be reported by Pi without violating PIW's structural validation contract.
-
----
-
-## 17. Architecture Summary
-
-```mermaid
-flowchart LR
-    FS["User-managed entries/"] --> Discovery["Discovery + structural classification"]
-    State["PIW-owned piw.json"] --> Profiles["Profile resolver"]
-    Discovery --> Registry["Flat runtime Entry registry"]
-    Registry --> Profiles
-    Registry --> Updater["Conservative Git/npm updater"]
-    Profiles --> Validation{"Profile available?"}
-    Validation -- No --> Diagnostics["Visible diagnostics"]
-    Validation -- Yes --> Compiler["Deterministic Pi argv compiler"]
-    Compiler --> Execve["execve Pi"]
-```
-
----
-
-## 18. Deferred Beyond v0.1
-
-The following are explicitly deferred and MUST NOT be inferred as v0.1 requirements:
+## 14. Deferred Beyond v0.1
 
 - Entry aliases or manual kind overrides;
 - configurable or multiple registry roots;
-- project-local profiles;
-- profile inheritance or groups;
-- profile-controlled model or thinking settings;
-- profile-controlled active theme selection;
-- package resource filtering;
-- switching profiles inside a running Pi session;
-- machine-readable JSON output;
-- npm alias, workspace, or transitive dependency updates;
-- integration with Pi's package update command;
-- a PIW self-updater; and
+- compatibility migration for the incorrect unreleased layout;
+- project-local profiles, inheritance, or groups;
+- profile-controlled model, thinking, or active theme state;
+- package resource filtering or package semantic validation;
+- filesystem watchers, daemons, databases, or new config formats;
+- machine-readable output;
+- integration with Pi's own package installer/update state;
+- PIW self-update; and
 - Windows support.
-
----
-
-## 19. Pi Compatibility Basis
-
-PIW v0.1 requires Pi `>=0.84.1` and relies on these Pi behaviors:
-
-- `-e` / `--extension` explicitly loads an extension file or local package directory;
-- an explicit local package directory is expanded using Pi package rules;
-- `--skill`, `--prompt-template`, and `--theme` load explicit resources;
-- `--no-extensions`, `--no-skills`, `--no-prompt-templates`, and `--no-themes` disable automatic discovery while retaining explicit CLI resources;
-- Pi packages may expose extensions, skills, prompts, and themes through a manifest or conventional directories; and
-- `--theme` loads a theme resource but does not select the active theme.
-
-Release verification MUST test these assumptions against Pi `0.84.1` and the latest stable Pi version before publication.
-
-Official references:
-
-- https://pi.dev/docs/latest/packages
-- https://pi.dev/docs/latest/extensions
-- https://pi.dev/docs/latest/skills
-- https://pi.dev/docs/latest/prompt-templates
-- https://pi.dev/docs/latest/themes
-- https://pi.dev/docs/latest/usage

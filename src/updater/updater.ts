@@ -1,29 +1,63 @@
-import type {Entry} from "../domain.js";
+import type {ValidEntry} from "../domain.js";
 
-export type UpdateTarget = {kind: "git" | "npm"; key: string; label: string} | {kind: "unmanaged"; key: string; label: string};
-export type UpdateOutcome =
-  | {status: "updated" | "up-to-date"; manager: "git" | "npm"}
-  | {status: "skipped" | "failed"; manager: "git" | "npm"; reason: string}
-  | {status: "unmanaged"; manager: "local"};
-export type UpdateClassifier = (entry: Entry) => Promise<UpdateTarget>;
-export type UpdateExecutor = (key: string, target: UpdateTarget) => Promise<UpdateOutcome>;
-export interface EntryUpdateResult {entry: Entry; outcome: UpdateOutcome}
+export type UpdateManager = "git" | "npm";
 
-export async function runUpdates(entries: Entry[], classify: UpdateClassifier, execute: UpdateExecutor): Promise<EntryUpdateResult[]> {
-  const cache = new Map<string, UpdateOutcome>();
+export interface UpdateStep {
+  manager: UpdateManager;
+  key: string;
+  cwd: string;
+}
+
+export type StepResult =
+  | {manager: UpdateManager; status: "updated" | "up-to-date"}
+  | {manager: UpdateManager; status: "skipped" | "failed"; reason: string}
+  | {manager: "local"; status: "unmanaged"}
+  | {manager: "local"; status: "failed"; reason: string};
+
+export interface EntryUpdateResult {
+  entry: ValidEntry;
+  steps: StepResult[];
+}
+
+export type UpdateDetector = (entry: ValidEntry) => Promise<UpdateStep[]>;
+export type UpdateExecutor = (step: UpdateStep) => Promise<StepResult>;
+
+function reason(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export async function runUpdates(entries: readonly ValidEntry[], detect: UpdateDetector, execute: UpdateExecutor): Promise<EntryUpdateResult[]> {
+  const cache = new Map<string, StepResult>();
   const results: EntryUpdateResult[] = [];
   for (const entry of entries) {
-    let target: UpdateTarget;
-    try { target = await classify(entry); }
-    catch (error) { results.push({entry, outcome: {status: "failed", manager: "git", reason: error instanceof Error ? error.message : String(error)}}); continue; }
-    if (target.kind === "unmanaged") { results.push({entry, outcome: {status: "unmanaged", manager: "local"}}); continue; }
-    let outcome = cache.get(target.key);
-    if (!outcome) {
-      try { outcome = await execute(target.key, target); }
-      catch (error) { outcome = {status: "failed", manager: target.kind, reason: error instanceof Error ? error.message : String(error)}; }
-      cache.set(target.key, outcome);
+    let phases: UpdateStep[];
+    try { phases = await detect(entry); }
+    catch (cause) {
+      results.push({entry, steps: [{manager: "local", status: "failed", reason: reason(cause)}]});
+      continue;
     }
-    results.push({entry, outcome});
+    if (!phases.length) {
+      results.push({entry, steps: [{manager: "local", status: "unmanaged"}]});
+      continue;
+    }
+
+    const steps: StepResult[] = [];
+    let gitCompletedSafely = true;
+    for (const phase of phases) {
+      if (phase.manager === "npm" && !gitCompletedSafely) {
+        steps.push({manager: "npm", status: "skipped", reason: "git phase did not complete safely"});
+        continue;
+      }
+      let result = cache.get(phase.key);
+      if (!result) {
+        try { result = await execute(phase); }
+        catch (cause) { result = {manager: phase.manager, status: "failed", reason: reason(cause)}; }
+        cache.set(phase.key, result);
+      }
+      steps.push(result);
+      if (phase.manager === "git") gitCompletedSafely = result.manager === "git" && (result.status === "updated" || result.status === "up-to-date");
+    }
+    results.push({entry, steps});
   }
   return results;
 }

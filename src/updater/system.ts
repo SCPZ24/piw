@@ -1,75 +1,97 @@
-import {lstat, readFile, realpath} from "node:fs/promises";
+import {lstat, realpath, stat} from "node:fs/promises";
 import path from "node:path";
 import {commandOutput, findExecutable} from "../launcher/launcher.js";
-import type {Entry} from "../domain.js";
-import type {UpdateClassifier, UpdateExecutor, UpdateOutcome, UpdateTarget} from "./updater.js";
+import type {ValidEntry} from "../domain.js";
+import type {StepResult, UpdateDetector, UpdateExecutor, UpdateStep} from "./updater.js";
 
-async function gitOutput(root: string, args: string[]) { return commandOutput("git", ["-C", root, ...args]); }
+interface CommandResult {code: number; stdout: string; stderr: string}
 
-export const classifySystemUpdate: UpdateClassifier = async (entry: Entry): Promise<UpdateTarget> => {
-  if (await findExecutable("git")) {
-    const top = await gitOutput(entry.realPath, ["rev-parse", "--show-toplevel"]).catch(() => ({code: 1, stdout: "", stderr: ""}));
-    if (top.code === 0) {
-      const root = await realpath(top.stdout.trim());
-      if (root === entry.realPath) return {kind: "git", key: `git:${root}`, label: root};
-    }
-  }
-  const parts = entry.realPath.split(path.sep);
-  const nodeModules = parts.lastIndexOf("node_modules");
-  if (nodeModules < 1) return {kind: "unmanaged", key: `local:${entry.realPath}`, label: entry.realPath};
-  const rest = parts.slice(nodeModules + 1);
-  const packageName = rest[0]?.startsWith("@") ? rest.slice(0, 2).join("/") : rest[0];
-  if (!packageName || rest.length !== (packageName.startsWith("@") ? 2 : 1)) return {kind: "unmanaged", key: `local:${entry.realPath}`, label: entry.realPath};
-  const installRoot = parts.slice(0, nodeModules).join(path.sep) || path.sep;
+export interface SystemUpdaterDependencies {
+  findExecutable: (name: string) => Promise<string | undefined>;
+  commandOutput: (command: string, args: string[], cwd?: string) => Promise<CommandResult>;
+}
+
+async function isRegularFile(filePath: string): Promise<boolean> {
+  try { return (await stat(filePath)).isFile(); }
+  catch { return false; }
+}
+
+async function hasGitMarker(root: string): Promise<boolean> {
   try {
-    const own = JSON.parse(await readFile(path.join(entry.realPath, "package.json"), "utf8"));
-    const root = JSON.parse(await readFile(path.join(installRoot, "package.json"), "utf8"));
-    const lock = JSON.parse(await readFile(path.join(installRoot, "package-lock.json"), "utf8"));
-    const direct = root.dependencies?.[packageName] ?? root.devDependencies?.[packageName] ?? root.optionalDependencies?.[packageName];
-    const record = lock.packages?.[`node_modules/${packageName}`];
-    const installedPath = path.join(installRoot, "node_modules", packageName);
-    const installedStat = await lstat(installedPath);
-    if (!direct || ![2, 3].includes(lock.lockfileVersion) || !record || record.link === true || installedStat.isSymbolicLink() || await realpath(installedPath) !== entry.realPath || own.name !== packageName || !own.version || own.version !== record.version) throw new Error();
-    return {kind: "npm", key: `npm:${installRoot}:${packageName}`, label: `${installRoot}\0${packageName}`};
-  } catch { return {kind: "unmanaged", key: `local:${entry.realPath}`, label: entry.realPath}; }
-};
+    const marker = await lstat(path.join(root, ".git"));
+    return marker.isFile() || marker.isDirectory();
+  } catch {
+    return false;
+  }
+}
 
-export const executeSystemUpdate: UpdateExecutor = async (_key, target): Promise<UpdateOutcome> => {
-  if (target.kind === "git") {
-    if (!await findExecutable("git")) return {status: "skipped", manager: "git", reason: "git not found"};
-    const root = target.label;
-    const status = await gitOutput(root, ["status", "--porcelain"]);
-    if (status.code || status.stdout.trim()) return {status: "skipped", manager: "git", reason: "dirty working tree"};
-    const branch = await gitOutput(root, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
-    if (branch.code) return {status: "skipped", manager: "git", reason: "detached HEAD"};
-    const upstream = await gitOutput(root, ["rev-parse", "--abbrev-ref", "@{upstream}"]);
-    if (upstream.code) return {status: "skipped", manager: "git", reason: "missing upstream"};
-    const before = await gitOutput(root, ["rev-parse", "HEAD"]);
-    const pull = await gitOutput(root, ["pull", "--ff-only"]);
-    if (pull.code) return {status: "failed", manager: "git", reason: pull.stderr.trim() || "git pull failed"};
-    const after = await gitOutput(root, ["rev-parse", "HEAD"]);
-    if (before.code || after.code) return {status: "failed", manager: "git", reason: "could not verify HEAD after update"};
-    return {status: before.stdout.trim() === after.stdout.trim() ? "up-to-date" : "updated", manager: "git"};
-  }
-  if (target.kind === "npm") {
-    if (!await findExecutable("npm")) return {status: "skipped", manager: "npm", reason: "npm not found"};
-    const [installRoot, packageName] = target.label.split("\0");
-    if (!installRoot || !packageName) return {status: "failed", manager: "npm", reason: "invalid update target"};
-    const evidence = async () => {
-      const own = JSON.parse(await readFile(path.join(installRoot, "node_modules", packageName, "package.json"), "utf8"));
-      const lock = JSON.parse(await readFile(path.join(installRoot, "package-lock.json"), "utf8"));
-      const record = lock.packages?.[`node_modules/${packageName}`];
-      if (own.name !== packageName || !own.version || !record || record.link === true || record.version !== own.version) throw new Error("npm ownership evidence is no longer valid");
-      return JSON.stringify({version: own.version, record});
-    };
-    let before: string;
-    try { before = await evidence(); } catch (error) { return {status: "failed", manager: "npm", reason: (error as Error).message}; }
-    const result = await commandOutput("npm", ["update", packageName], installRoot);
-    if (result.code) return {status: "failed", manager: "npm", reason: result.stderr.trim() || "npm update failed"};
+function commandFailure(result: CommandResult, fallback: string): string {
+  return result.stderr.trim() || result.stdout.trim() || fallback;
+}
+
+export function createSystemUpdater(dependencies: SystemUpdaterDependencies): {detect: UpdateDetector; execute: UpdateExecutor} {
+  const detect: UpdateDetector = async (entry: ValidEntry): Promise<UpdateStep[]> => {
+    const phases: UpdateStep[] = [];
+    const git = await dependencies.findExecutable("git");
+    if (git) {
+      const top = await dependencies.commandOutput(git, ["-C", entry.realPath, "rev-parse", "--show-toplevel"]).catch(() => ({code: 1, stdout: "", stderr: ""}));
+      if (top.code === 0) {
+        try {
+          const root = await realpath(top.stdout.trim());
+          if (root === entry.realPath) phases.push({manager: "git", key: `git:${root}`, cwd: root});
+        } catch {
+          // An unresolved reported root is not safe to update.
+        }
+      }
+    } else if (await hasGitMarker(entry.realPath)) {
+      phases.push({manager: "git", key: `git:${entry.realPath}`, cwd: entry.realPath});
+    }
+    if (await isRegularFile(path.join(entry.realPath, "package.json"))) {
+      phases.push({manager: "npm", key: `npm:${entry.realPath}`, cwd: entry.realPath});
+    }
+    return phases;
+  };
+
+  const executeGit = async (step: UpdateStep): Promise<StepResult> => {
+    const git = await dependencies.findExecutable("git");
+    if (!git) return {manager: "git", status: "skipped", reason: "git not found"};
+    const run = async (args: string[]) => dependencies.commandOutput(git, ["-C", step.cwd, ...args]);
+
+    const status = await run(["status", "--porcelain"]);
+    if (status.code !== 0) return {manager: "git", status: "failed", reason: commandFailure(status, "git status failed")};
+    if (status.stdout.trim()) return {manager: "git", status: "skipped", reason: "dirty working tree"};
+    const branch = await run(["symbolic-ref", "--quiet", "--short", "HEAD"]);
+    if (branch.code !== 0) return {manager: "git", status: "skipped", reason: "detached HEAD"};
+    const upstream = await run(["rev-parse", "--abbrev-ref", "@{upstream}"]);
+    if (upstream.code !== 0) return {manager: "git", status: "skipped", reason: "missing upstream"};
+    const before = await run(["rev-parse", "HEAD"]);
+    if (before.code !== 0 || !before.stdout.trim()) return {manager: "git", status: "failed", reason: commandFailure(before, "could not read HEAD before update")};
+    const pull = await run(["pull", "--ff-only"]);
+    if (pull.code !== 0) return {manager: "git", status: "failed", reason: commandFailure(pull, "git pull failed")};
+    const after = await run(["rev-parse", "HEAD"]);
+    if (after.code !== 0 || !after.stdout.trim()) return {manager: "git", status: "failed", reason: commandFailure(after, "could not verify HEAD after update")};
+    return {manager: "git", status: before.stdout.trim() === after.stdout.trim() ? "up-to-date" : "updated"};
+  };
+
+  const executeNpm = async (step: UpdateStep): Promise<StepResult> => {
+    const npm = await dependencies.findExecutable("npm");
+    if (!npm) return {manager: "npm", status: "skipped", reason: "npm not found"};
+    if (!await isRegularFile(path.join(step.cwd, "package.json"))) return {manager: "npm", status: "failed", reason: "package.json is no longer a regular file"};
+    const result = await dependencies.commandOutput(npm, ["update", "--json"], step.cwd);
+    if (result.code !== 0) return {manager: "npm", status: "failed", reason: commandFailure(result, "npm update failed")};
     try {
-      const after = await evidence();
-      return {status: before === after ? "up-to-date" : "updated", manager: "npm"};
-    } catch { return {status: "failed", manager: "npm", reason: "could not verify package after update"}; }
-  }
-  return {status: "unmanaged", manager: "local"};
-};
+      const parsed = JSON.parse(result.stdout) as {added?: unknown; removed?: unknown; changed?: unknown};
+      const changed = [parsed.added, parsed.removed, parsed.changed].some((value) => typeof value === "number" && value > 0);
+      return {manager: "npm", status: changed ? "updated" : "up-to-date"};
+    } catch {
+      return {manager: "npm", status: "updated"};
+    }
+  };
+
+  const execute: UpdateExecutor = async (step) => step.manager === "git" ? executeGit(step) : executeNpm(step);
+  return {detect, execute};
+}
+
+const systemUpdater = createSystemUpdater({findExecutable, commandOutput});
+export const detectSystemUpdates = systemUpdater.detect;
+export const executeSystemUpdate = systemUpdater.execute;

@@ -7,12 +7,12 @@ import {naturalCompare, type PiwStateV1, validateIdentifier, validateProfileName
 export class StateValidationError extends Error {}
 export class ConcurrentStateError extends Error {}
 
-export interface PiwPaths {piwHome: string; registryRoot: string; stateFile: string}
+export interface PiwPaths {piwHome: string; stateFile: string}
 export interface LoadedState {state: PiwStateV1; fingerprint: string; rawBytes: Uint8Array}
 
 export function getPiwPaths(home: string): PiwPaths {
   const piwHome = path.join(home, ".pi", "piw");
-  return {piwHome, registryRoot: path.join(piwHome, "entries"), stateFile: path.join(piwHome, "piw.json")};
+  return {piwHome, stateFile: path.join(piwHome, "piw.json")};
 }
 
 function exactKeys(value: object, expected: string[], label: string): void {
@@ -53,7 +53,7 @@ function fingerprint(bytes: Uint8Array): string { return createHash("sha256").up
 
 export async function ensurePiwHome(home: string): Promise<PiwPaths> {
   const paths = getPiwPaths(home);
-  await mkdir(paths.registryRoot, {recursive: true});
+  await mkdir(paths.piwHome, {recursive: true});
   try { await access(paths.stateFile, constants.F_OK); }
   catch {
     const handle = await open(paths.stateFile, "wx", 0o600).catch((error: NodeJS.ErrnoException) => {
@@ -68,7 +68,7 @@ export async function ensurePiwHome(home: string): Promise<PiwPaths> {
 export async function loadState(stateFile: string): Promise<LoadedState> {
   const rawBytes = await readFile(stateFile);
   let parsed: unknown;
-  try { parsed = JSON.parse(rawBytes.toString("utf8")); } catch { throw new StateValidationError("PIW state is not valid UTF-8 JSON"); }
+  try { parsed = JSON.parse(new TextDecoder("utf-8", {fatal: true}).decode(rawBytes)); } catch { throw new StateValidationError("PIW state is not valid UTF-8 JSON"); }
   return {state: validateState(parsed), fingerprint: fingerprint(rawBytes), rawBytes};
 }
 

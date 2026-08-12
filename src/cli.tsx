@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import {parsePiwArgs, CliUsageError} from "./cli/args.js";
-import {configure, launch, printDoctor, printList, selectProfile, snapshot, updateEntries} from "./app.js";
+import {configure, launch, printList, runDoctor, selectProfile, snapshot, updateEntries} from "./app.js";
 import packageJson from "../package.json" with {type: "json"};
 
 const HELP = `piw - lightweight Pi profile launcher
@@ -18,9 +18,9 @@ async function main(): Promise<number> {
   if (command.kind === "select") return selectProfile(command.passthrough);
   if (command.kind === "launch") return launch(command.profile, command.passthrough);
   if (command.kind === "config") return configure();
-  const current = await snapshot(process.env.HOME, command.kind !== "list" && command.kind !== "doctor");
+  if (command.kind === "doctor") return await runDoctor() ? 1 : 0;
+  const current = await snapshot(process.env.HOME, command.kind !== "list");
   if (command.kind === "list") { printList(current); return 0; }
-  if (command.kind === "doctor") return await printDoctor(current) ? 1 : 0;
   return await updateEntries(current) ? 1 : 0;
 }
 

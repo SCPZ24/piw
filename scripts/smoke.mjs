@@ -1,15 +1,16 @@
 import {mkdtemp, readFile, writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import path from "node:path";
-import {assertCommand, assertLaunch, createSmokeEnvironment} from "./smoke-helpers.mjs";
+import {assertAdd, assertCommand, assertLaunch, createSmokeEnvironment} from "./smoke-helpers.mjs";
 
 const root = await mkdtemp(path.join(tmpdir(), "piw-smoke-"));
 const fixture = await createSmokeEnvironment(root);
 const cli = new URL("../dist/cli.js", import.meta.url).pathname;
 for (const args of [["--version"], ["--help"], ["list"], ["doctor"]]) {
   const result = assertCommand(process.execPath, [cli, ...args], fixture.environment, `piw ${args.join(" ")}`);
-  if (args[0] === "--version" && result.stdout.trim() !== "1.0.0") throw new Error(`piw --version returned ${result.stdout.trim()}`);
+  if (args[0] === "--version" && result.stdout.trim() !== "1.0.1") throw new Error(`piw --version returned ${result.stdout.trim()}`);
 }
+await assertAdd(process.execPath, [cli], fixture);
 await assertLaunch(process.execPath, [cli], fixture);
 
 await writeFile(path.join(fixture.piwHome, "piw.json"), '{"version":3,"profiles":{}}\n');

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1
+
+- Add `piw add <npm-package>` to install missing Pi packages through Pi and expose them as symlink Entries.
+- Treat every top-level symlink Entry as externally managed and skip its target during `piw update`.
+- Report external ownership in `piw doctor` and extend isolated source/tarball smoke coverage.
+
 ## 1.0.0
 
 - Flat filesystem-native Entry registry under `~/.pi/piw/`.

@@ -1,10 +1,12 @@
 import {validateIdentifier} from "../domain.js";
+import {deriveEntryId, validateNpmPackageName} from "../packages/pi-package.js";
 
 export class CliUsageError extends Error {}
 
 export type ParsedCommand =
   | {kind: "select"; passthrough: string[]}
   | {kind: "launch"; profile: string; passthrough: string[]}
+  | {kind: "add"; packageName: string}
   | {kind: "config" | "update" | "list" | "doctor" | "help" | "version"};
 
 const RESOURCE_OPTIONS = new Set([
@@ -27,6 +29,15 @@ export function parsePiwArgs(argv: string[]): ParsedCommand {
   validatePassthrough(passthrough);
 
   if (own.length === 0) return {kind: "select", passthrough};
+  if (own[0] === "add") {
+    if (separator !== -1) throw new CliUsageError("add does not accept Pi arguments");
+    if (own.length !== 2) throw new CliUsageError("Usage: piw add <package-name>");
+    const packageName = own[1]!;
+    if (!validateNpmPackageName(packageName)) throw new CliUsageError(`Invalid npm package name: ${packageName}`);
+    try { deriveEntryId(packageName); }
+    catch (cause) { throw new CliUsageError(cause instanceof Error ? cause.message : String(cause)); }
+    return {kind: "add", packageName};
+  }
   if (own.length !== 1) throw new CliUsageError("Expected one PIW command or profile name before --");
 
   const value = own[0]!;

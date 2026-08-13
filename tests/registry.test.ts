@@ -95,6 +95,29 @@ describe("directory-only Entry discovery", () => {
     expect(result.entries.find(({id}) => id === "bad")).toMatchObject({id: "bad", status: "invalid"});
   });
 
+  test("discovers an absolute Pi-store symlink as an opaque package Entry", async () => {
+    const base = await mkdtemp(path.join(tmpdir(), "piw-added-package-"));
+    const root = path.join(base, ".pi", "piw");
+    const target = path.join(base, ".pi", "agent", "npm", "node_modules", "@narumitw", "pi-worktree");
+    await mkdir(root, {recursive: true});
+    await mkdir(target, {recursive: true});
+    await writeFile(path.join(target, "package.json"), JSON.stringify({name: "@narumitw/pi-worktree", pi: {extensions: ["./src/index.ts"]}}));
+    const registryPath = path.join(root, "pi-worktree");
+    await symlink(target, registryPath);
+
+    const result = await discoverEntries(root);
+
+    expect(result.entries).toEqual([{
+      id: "pi-worktree",
+      registryPath,
+      realPath: await realpath(target),
+      status: "valid",
+      kind: "package",
+      launchPath: await realpath(target),
+      diagnostics: [],
+    }]);
+  });
+
   test("invalidates broken links, unclassified Entries, kind ambiguity, and dual extension entrypoints", async () => {
     const root = await registry();
     await symlink(path.join(root, "missing-target"), path.join(root, "broken"));

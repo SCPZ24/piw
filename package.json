@@ -1,6 +1,6 @@
 {
   "name": "@scpz24/piw",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A lightweight filesystem-native profile manager and launcher for Pi",
   "type": "module",
   "bin": {

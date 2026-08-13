@@ -1,4 +1,4 @@
-import {access, mkdir, mkdtemp, writeFile} from "node:fs/promises";
+import {access, mkdir, mkdtemp, realpath, symlink, writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import path from "node:path";
 import {describe, expect, test} from "vitest";
@@ -83,5 +83,26 @@ describe("read-only doctor", () => {
     const lines: string[] = [];
     expect(await runDoctor(home, {PATH: bin}, (line) => lines.push(line))).toBe(false);
     expect(lines.join("\n")).toContain("OK no problems found");
+  });
+
+  test("reports a valid package symlink as external without warning or failure", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "piw-doctor-external-"));
+    const home = path.join(root, "home");
+    const piwHome = path.join(home, ".pi", "piw");
+    const target = path.join(home, ".pi", "agent", "npm", "node_modules", "@scope", "foo");
+    await mkdir(piwHome, {recursive: true});
+    await mkdir(target, {recursive: true});
+    await writeFile(path.join(piwHome, "piw.json"), '{"version":1,"profiles":{}}\n');
+    await writeFile(path.join(target, "package.json"), JSON.stringify({pi: {extensions: ["./index.ts"]}}));
+    await symlink(target, path.join(piwHome, "foo"));
+    const bin = await fakePi(root);
+    const lines: string[] = [];
+
+    expect(await runDoctor(home, {PATH: bin}, (line) => lines.push(line))).toBe(false);
+    const output = lines.join("\n");
+    expect(output).toContain(`foo\tpackage\tvalid\texternal\t${path.join(piwHome, "foo")} -> ${await realpath(target)}`);
+    expect(output).toContain("OK no problems found");
+    expect(output).not.toContain("WARN foo");
+    expect(output).not.toContain("ERROR foo");
   });
 });

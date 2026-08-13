@@ -1,5 +1,5 @@
 export const IDENTIFIER_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
-export const RESERVED_PROFILE_NAMES = new Set(["config", "update", "list", "doctor", "help", "version"]);
+export const RESERVED_PROFILE_NAMES = new Set(["add", "config", "update", "list", "doctor", "help", "version"]);
 
 export type EntryKind = "extension" | "skill" | "prompt" | "theme" | "package";
 export type DiagnosticSeverity = "warning" | "error";

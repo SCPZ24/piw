@@ -22,7 +22,7 @@ PIW owns one file: `~/.pi/piw/piw.json`. Everything else below `~/.pi/piw/` is u
     └── skills/
 ```
 
-There is no `entries/` layer and no kind-based registry hierarchy. PIW never copies, installs, moves, or deletes Entry content. Use the filesystem, Git, and npm directly to manage it.
+There is no `entries/` layer and no kind-based registry hierarchy. PIW never copies, moves, or deletes Entry content. Pi owns Pi package installation and updates; PIW can expose an installed package through one top-level symlink.
 
 ## Requirements
 
@@ -67,6 +67,25 @@ PIW recognizes five canonical directory forms:
 
 Package internals remain opaque to PIW. Pi applies package rules and remains the final authority on every resource's complete semantics.
 
+## Add a Pi package Entry
+
+Use `piw add` for an npm-distributed Pi package:
+
+```bash
+piw add @narumitw/pi-worktree
+```
+
+PIW asks Pi to install the package only when it is absent, then creates:
+
+```text
+~/.pi/piw/pi-worktree
+→ ~/.pi/agent/npm/node_modules/@narumitw/pi-worktree
+```
+
+The npm scope is omitted from the flat Entry ID. The symlink is the complete registry artifact: `piw add` creates no package metadata and does not create or modify `piw.json`. Run `piw config` afterward if you want to include the new Entry in a Profile.
+
+Pi continues to own package freshness, updates, configuration, and removal. A symlink Entry is externally managed and is always skipped by `piw update`. Creating the same link manually remains valid because the filesystem is still the registry.
+
 ## Commands
 
 ```text
@@ -74,6 +93,7 @@ piw                              select a profile interactively
 piw builder                      launch a profile directly
 piw builder -- --model x/y       pass non-resource arguments to Pi
 piw config                       configure profiles
+piw add @scope/package           install/link an npm Pi package as an Entry
 piw list                         inspect Entries and profiles
 piw doctor                       run read-only diagnostics
 piw update                       run Entry-local Git/npm update phases
@@ -90,7 +110,7 @@ For a profile run PIW first supplies:
 
 It then explicitly loads the selected Entries and replaces itself with Pi using `process.execve()`. Resource flags after `--` are rejected, so the profile remains the sole authority over the runtime resource set. Model, provider, session, tool, trust, message, and other non-resource arguments remain pass-through.
 
-`piw update` is intentionally simple. An Entry that is itself a safe Git worktree root may receive `git pull --ff-only`; an Entry with a root `package.json` may receive `npm update`. A Git+npm Entry runs Git first and runs npm only after Git completes safely. PIW stores no updater metadata and PIW itself is updated with npm, not `piw update`.
+`piw update` is intentionally simple. A real top-level Entry directory that is itself a safe Git worktree root may receive `git pull --ff-only`; one with a root `package.json` may receive `npm update`. A Git+npm Entry runs Git first and runs npm only after Git completes safely. A top-level symlink Entry is external and skipped before target inspection. PIW stores no updater metadata and PIW itself is updated with npm, not `piw update`.
 
 ## Security
 

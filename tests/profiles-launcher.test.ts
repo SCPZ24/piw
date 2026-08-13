@@ -42,3 +42,12 @@ test("list labels an invalid Entry without a classified kind", () => {
   expect(output).toHaveBeenCalledWith("bad\tunclassified\tinvalid\t/home/.pi/piw/bad");
   output.mockRestore();
 });
+
+test("launch compilation keeps a discovered package symlink's resolved root", () => {
+  expect(compilePiArgs([
+    {id: "pi-worktree", kind: "package", registryPath: "/home/.pi/piw/pi-worktree", realPath: "/home/.pi/agent/npm/node_modules/@narumitw/pi-worktree", launchPath: "/home/.pi/agent/npm/node_modules/@narumitw/pi-worktree", status: "valid", diagnostics: []},
+  ], [])).toEqual([
+    "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes",
+    "-e", "/home/.pi/agent/npm/node_modules/@narumitw/pi-worktree",
+  ]);
+});

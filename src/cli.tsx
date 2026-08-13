@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import {parsePiwArgs, CliUsageError} from "./cli/args.js";
 import {configure, launch, printList, runDoctor, selectProfile, snapshot, updateEntries} from "./app.js";
+import {addPiPackage} from "./packages/pi-package.js";
 import packageJson from "../package.json" with {type: "json"};
 
 const HELP = `piw - lightweight Pi profile launcher
@@ -8,6 +9,7 @@ const HELP = `piw - lightweight Pi profile launcher
 Usage:
   piw [-- <pi-args...>]
   piw <profile> [-- <pi-args...>]
+  piw add <package-name>             Install/link an npm Pi package as a PIW Entry
   piw config | update | list | doctor
   piw --help | --version`;
 
@@ -17,6 +19,15 @@ async function main(): Promise<number> {
   if (command.kind === "version") { console.log(packageJson.version); return 0; }
   if (command.kind === "select") return selectProfile(command.passthrough);
   if (command.kind === "launch") return launch(command.profile, command.passthrough);
+  if (command.kind === "add") {
+    const home = process.env.HOME;
+    if (!home) throw new Error("HOME is not set");
+    const result = await addPiPackage(command.packageName, home);
+    console.log(result.status === "already-available"
+      ? `${result.entryId} is already available.`
+      : `Added ${result.entryId} -> ${result.installedPath}`);
+    return 0;
+  }
   if (command.kind === "config") return configure();
   if (command.kind === "doctor") return await runDoctor() ? 1 : 0;
   const current = await snapshot(process.env.HOME, command.kind !== "list");

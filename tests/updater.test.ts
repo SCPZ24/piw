@@ -1,4 +1,4 @@
-import {mkdir, mkdtemp, realpath, writeFile} from "node:fs/promises";
+import {mkdir, mkdtemp, realpath, symlink, writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import path from "node:path";
 import {describe, expect, test, vi} from "vitest";
@@ -6,8 +6,8 @@ import type {ValidEntry} from "../src/domain.js";
 import {runUpdates, type UpdateDetector, type UpdateExecutor, type UpdateStep} from "../src/updater/updater.js";
 import {createSystemUpdater, type SystemUpdaterDependencies} from "../src/updater/system.js";
 
-const entry = (id: string, realPath = `/real/${id}`): ValidEntry => ({
-  id, kind: "extension", registryPath: `/registry/${id}`, realPath, launchPath: `${realPath}/index.ts`, status: "valid", diagnostics: [],
+const entry = (id: string, realPath = `/real/${id}`, registryPath = `/registry/${id}`): ValidEntry => ({
+  id, kind: "extension", registryPath, realPath, launchPath: `${realPath}/index.ts`, status: "valid", diagnostics: [],
 });
 
 describe("multi-phase update orchestration", () => {
@@ -16,7 +16,7 @@ describe("multi-phase update orchestration", () => {
       {manager: "git", key: "git:/real/a", cwd: "/real/a"},
       {manager: "npm", key: "npm:/real/a", cwd: "/real/a"},
     ];
-    const detector: UpdateDetector = async () => detected;
+    const detector: UpdateDetector = async () => ({ownership: "local", phases: detected});
     const order: string[] = [];
     const executor: UpdateExecutor = async (step) => {
       order.push(step.manager);
@@ -32,9 +32,9 @@ describe("multi-phase update orchestration", () => {
     {manager: "git" as const, status: "failed" as const, reason: "pull failed"},
   ])("skips npm after Git $status", async (gitResult) => {
     const execute = vi.fn<UpdateExecutor>(async (step) => step.manager === "git" ? gitResult : {manager: "npm", status: "updated"});
-    const [result] = await runUpdates([entry("a")], async () => [
+    const [result] = await runUpdates([entry("a")], async () => ({ownership: "local", phases: [
       {manager: "git", key: "git:/real/a", cwd: "/real/a"}, {manager: "npm", key: "npm:/real/a", cwd: "/real/a"},
-    ], execute);
+    ]}), execute);
     expect(execute).toHaveBeenCalledTimes(1);
     expect(result?.steps[1]).toEqual({manager: "npm", status: "skipped", reason: "git phase did not complete safely"});
   });
@@ -43,18 +43,18 @@ describe("multi-phase update orchestration", () => {
     const execute: UpdateExecutor = async (step) => step.cwd.endsWith("a")
       ? {manager: step.manager, status: "failed", reason: "failed"}
       : {manager: step.manager, status: "up-to-date"};
-    const results = await runUpdates([entry("a"), entry("b"), entry("c")], async (candidate) => candidate.id === "c" ? [] : [
+    const results = await runUpdates([entry("a"), entry("b"), entry("c")], async (candidate) => ({ownership: "local", phases: candidate.id === "c" ? [] : [
       {manager: "npm", key: `npm:${candidate.realPath}`, cwd: candidate.realPath},
-    ], execute);
+    ]}), execute);
     expect(results.map(({steps}) => steps[0]?.status)).toEqual(["failed", "up-to-date", "unmanaged"]);
   });
 
   test("deduplicates phase mutation by manager and real path", async () => {
     const execute = vi.fn<UpdateExecutor>(async (step) => ({manager: step.manager, status: "updated"}));
     const shared = "/real/shared";
-    const results = await runUpdates([entry("a", shared), entry("b", shared)], async () => [
+    const results = await runUpdates([entry("a", shared), entry("b", shared)], async () => ({ownership: "local", phases: [
       {manager: "git", key: `git:${shared}`, cwd: shared}, {manager: "npm", key: `npm:${shared}`, cwd: shared},
-    ], execute);
+    ]}), execute);
     expect(execute).toHaveBeenCalledTimes(2);
     expect(results[0]?.steps).toEqual(results[1]?.steps);
   });
@@ -62,10 +62,17 @@ describe("multi-phase update orchestration", () => {
   test("turns detection errors into local failures and continues", async () => {
     const results = await runUpdates([entry("a"), entry("b")], async (candidate) => {
       if (candidate.id === "a") throw new Error("disappeared");
-      return [];
+      return {ownership: "local", phases: []};
     }, async (step) => ({manager: step.manager, status: "updated"}));
     expect(results[0]?.steps).toEqual([{manager: "local", status: "failed", reason: "disappeared"}]);
     expect(results[1]?.steps).toEqual([{manager: "local", status: "unmanaged"}]);
+  });
+
+  test("reports external ownership without executing update phases", async () => {
+    const execute = vi.fn<UpdateExecutor>();
+    const [result] = await runUpdates([entry("external")], async () => ({ownership: "external"}), execute);
+    expect(result?.steps).toEqual([{manager: "external", status: "external"}]);
+    expect(execute).not.toHaveBeenCalled();
   });
 });
 
@@ -81,10 +88,10 @@ describe("system update adapter", () => {
       commandOutput: async (_command, args) => args.includes("--show-toplevel") ? output(`${canonical}\n`) : output(),
     };
     const updater = createSystemUpdater(deps);
-    expect(await updater.detect(entry("x", canonical))).toEqual([
+    expect(await updater.detect(entry("x", canonical, canonical))).toEqual({ownership: "local", phases: [
       {manager: "git", key: `git:${canonical}`, cwd: canonical},
       {manager: "npm", key: `npm:${canonical}`, cwd: canonical},
-    ]);
+    ]});
   });
 
   test("does not treat a monorepo subdirectory as a Git root", async () => {
@@ -96,23 +103,23 @@ describe("system update adapter", () => {
       findExecutable: async (name) => name === "git" ? "/bin/git" : "/bin/npm",
       commandOutput: async () => output(`${root}\n`),
     });
-    expect(await updater.detect(entry("child", child))).toEqual([
+    expect(await updater.detect(entry("child", child, child))).toEqual({ownership: "local", phases: [
       {manager: "npm", key: `npm:${child}`, cwd: child},
-    ]);
+    ]});
   });
 
   test("detects a non-Git root package.json as npm-only", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "piw-update-npm-only-"));
     await writeFile(path.join(root, "package.json"), "{}\n");
     const updater = createSystemUpdater({findExecutable: async (name) => name === "npm" ? "/bin/npm" : undefined, commandOutput: async () => output()});
-    expect(await updater.detect(entry("x", root))).toEqual([{manager: "npm", key: `npm:${root}`, cwd: root}]);
+    expect(await updater.detect(entry("x", root, root))).toEqual({ownership: "local", phases: [{manager: "npm", key: `npm:${root}`, cwd: root}]});
   });
 
   test("keeps a Git phase when git is missing but a linked-worktree marker exists", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "piw-update-gitfile-"));
     await writeFile(path.join(root, ".git"), "gitdir: /external/worktree\n");
     const updater = createSystemUpdater({findExecutable: async () => undefined, commandOutput: async () => output()});
-    expect(await updater.detect(entry("x", root))).toEqual([{manager: "git", key: `git:${root}`, cwd: root}]);
+    expect(await updater.detect(entry("x", root, root))).toEqual({ownership: "local", phases: [{manager: "git", key: `git:${root}`, cwd: root}]});
     expect(await updater.execute({manager: "git", key: `git:${root}`, cwd: root})).toEqual({manager: "git", status: "skipped", reason: "git not found"});
   });
 
@@ -125,8 +132,8 @@ describe("system update adapter", () => {
       : output());
     const updater = createSystemUpdater({findExecutable: async (name) => name === "git" ? "/bin/git" : "/bin/npm", commandOutput});
 
-    const phases = await updater.detect(entry("x", root));
-    const [result] = await runUpdates([entry("x", root)], async () => phases, updater.execute);
+    const detection = await updater.detect(entry("x", root, root));
+    const [result] = await runUpdates([entry("x", root, root)], async () => detection, updater.execute);
 
     expect(result?.steps).toEqual([
       {manager: "git", status: "failed", reason: "could not verify Git worktree"},
@@ -142,8 +149,8 @@ describe("system update adapter", () => {
     const commandOutput = vi.fn(async () => output());
     const updater = createSystemUpdater({findExecutable: async (name) => name === "npm" ? "/bin/npm" : undefined, commandOutput});
 
-    const phases = await updater.detect(entry("x", root));
-    const [result] = await runUpdates([entry("x", root)], async () => phases, updater.execute);
+    const detection = await updater.detect(entry("x", root, root));
+    const [result] = await runUpdates([entry("x", root, root)], async () => detection, updater.execute);
 
     expect(result?.steps).toEqual([
       {manager: "git", status: "skipped", reason: "git not found"},
@@ -208,5 +215,27 @@ describe("system update adapter", () => {
       ["-C", "/entry", "pull", "--ff-only"],
       ["-C", "/entry", "rev-parse", "HEAD"],
     ]);
+  });
+
+  test("classifies a top-level symlink as external before inspecting its Git and npm target", async () => {
+    const base = await mkdtemp(path.join(tmpdir(), "piw-update-external-"));
+    const target = path.join(base, "target");
+    const registryPath = path.join(base, "entry");
+    await mkdir(target);
+    await mkdir(path.join(target, ".git"));
+    await writeFile(path.join(target, "package.json"), "{}\n");
+    await symlink(target, registryPath);
+    const findExecutable = vi.fn(async () => "/bin/tool");
+    const commandOutput = vi.fn(async () => output());
+    const updater = createSystemUpdater({findExecutable, commandOutput});
+    const candidate = entry("entry", target, registryPath);
+
+    expect(await updater.detect(candidate)).toEqual({ownership: "external"});
+    expect(findExecutable).not.toHaveBeenCalled();
+    expect(commandOutput).not.toHaveBeenCalled();
+    const execute = vi.fn<UpdateExecutor>();
+    const [result] = await runUpdates([candidate], updater.detect, execute);
+    expect(result?.steps).toEqual([{manager: "external", status: "external"}]);
+    expect(execute).not.toHaveBeenCalled();
   });
 });

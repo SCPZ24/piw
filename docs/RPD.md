@@ -25,7 +25,7 @@ flowchart LR
 
 The filesystem is the source of truth for Entries. `~/.pi/piw/piw.json` is the only PIW-owned persistent file. PIW validates only enough to decide how an Entry must be represented on Pi's command line. Pi remains the final authority on resource semantics.
 
-PIW is not another Pi Agent Home, package manager, resource installer, dependency resolver, package provenance system, replacement resource validator, daemon, or supervisor.
+PIW is not another Pi Agent Home, package manager, dependency resolver, package provenance system, replacement resource validator, daemon, or supervisor. `piw add` is only a bridge that asks Pi to install an npm package and exposes Pi's managed directory as a filesystem Entry.
 
 ## 2. Goals and Non-Goals
 
@@ -33,7 +33,7 @@ PIW v1.0 SHALL:
 
 - provide named profiles without duplicating Pi Agent Homes;
 - expose extensions, skills, prompt templates, themes, and Pi packages through one flat Entry abstraction;
-- derive every Entry from a user-managed top-level directory below `~/.pi/piw/`;
+- derive every Entry from a top-level directory or directory symlink below `~/.pi/piw/`;
 - keep profiles as deterministic sets of Entry IDs;
 - keep broken profiles visible while preventing them from launching;
 - disable Pi's automatic discovery for PIW-managed resource classes and explicitly load the selected resources;
@@ -46,7 +46,7 @@ PIW v1.0 SHALL NOT:
 - replace or redirect `~/.pi/agent`;
 - install, copy, move, rename, delete, repair, normalize, or vendor Entry content;
 - maintain Entry metadata, source metadata, dependency graphs, manager metadata, caches, or last-update state;
-- clone Git repositories or install missing Entries;
+- clone Git repositories or install Entry contents itself;
 - interpret, expand, validate, or filter the internal resources of a Pi package;
 - execute or import extension code during validation;
 - duplicate Pi's complete skill, prompt, theme, extension, or package validators;
@@ -88,7 +88,7 @@ State file:              ~/.pi/piw/piw.json
 
 There is no intermediate registry layer between the PIW root and its Entries, and no kind-based hierarchy such as `extensions/`, `skills/`, or `packages/` at registry level.
 
-On first mutating use PIW MAY create `~/.pi/piw/` and a minimal `piw.json`. It MUST NOT create any Entry directory. `piw list` and `piw doctor` are read-only and MUST NOT initialize missing paths or state.
+On first profile-mutating use PIW MAY create `~/.pi/piw/` and a minimal `piw.json`. `piw add` MAY create only the missing root and requested symlink; it MUST NOT create or modify `piw.json`. PIW MUST NOT create any real Entry directory. `piw list` and `piw doctor` are read-only and MUST NOT initialize missing paths or state.
 
 Everything other than `piw.json` under the root is user-managed. Except for an explicitly requested `piw update`, PIW MUST NOT write Entry content. PIW never writes hidden metadata beside Entries.
 
@@ -100,9 +100,24 @@ A top-level symbolic link is allowed when it resolves to a directory. PIW MUST:
 
 - use the symlink basename as the Entry ID;
 - retain the symlink path as `registryPath`;
-- use the resolved absolute target as `realPath` for validation, launch, and update detection;
+- use the resolved absolute target as `realPath` for validation and launch;
 - reject broken links, loops, unreadable targets, and links to files; and
-- never mutate or replace the symlink itself.
+- classify the Entry as externally owned before update target inspection; and
+- never mutate or replace the symlink or its target.
+
+### 3.2 Pi-Managed Package Links
+
+`piw add <npm-package>` accepts an unversioned npm identity in `name` or `@scope/name` form. It derives the Entry ID from the package basename, validates that ID using PIW's flat Entry rules, and resolves the requested package directly below Pi's documented user package store:
+
+```mermaid
+flowchart LR
+    Npm["npm package identity"] --> Pi["pi install npm:&lt;package&gt;"]
+    Pi --> Store["~/.pi/agent/npm/node_modules/&lt;package&gt;"]
+    Store -->|"absolute symlink"| Entry["~/.pi/piw/&lt;basename&gt;"]
+    Entry --> Discover["normal Entry discovery"]
+```
+
+PIW checks the exact managed path and calls Pi only when that directory is absent. After a successful Pi command it verifies the directory before linking. A correct existing link is an idempotent success; a real object, wrong link, or broken link at the Entry path is an error and is never replaced. `piw add` does not scan all `node_modules`, update an installed package, select the Entry in a Profile, store registration/source/ownership metadata, or provide a freshness guarantee. Pi owns package lifecycle; PIW owns profile composition; the symlink is the registry artifact.
 
 The reserved `piw.json` file and every name beginning with `.` are ignored by discovery. Any other top-level regular file or unsupported object is not an Entry and is reported by `doctor` as an unsupported root item. Loose resources such as `browser.ts`, `review.md`, and `theme.json` are not supported.
 
@@ -136,7 +151,7 @@ Rules:
 - A profile has exactly one `entries` array.
 - `version` is exactly `1`; future versions fail safely and are never rewritten.
 - Profile names and Entry IDs match `^[a-z0-9][a-z0-9_-]{0,63}$`.
-- Reserved profile names are `config`, `update`, `list`, `doctor`, `help`, and `version`.
+- Reserved profile names are `add`, `config`, `update`, `list`, `doctor`, `help`, and `version`.
 - Profile Entry IDs are unique and normalized into deterministic natural order.
 - State MUST NOT store Entry paths, kinds, launch paths, source or updater metadata, timestamps, caches, or active theme.
 
@@ -327,6 +342,7 @@ piw -- <pi-args...>
 piw <profile>
 piw <profile> -- <pi-args...>
 piw config
+piw add <npm-package>
 piw update
 piw list
 piw doctor
@@ -334,7 +350,7 @@ piw --help
 piw --version
 ```
 
-Interactive selector and configuration commands require a TTY. `list` and `doctor` are read-only. Exit `0` means success or doctor warnings only, exit `1` means operational/validation/update failure, and exit `2` means CLI usage error.
+Interactive selector and configuration commands require a TTY. `list` and `doctor` are read-only. `add` accepts exactly one npm package identity and no Pi pass-through arguments. Exit `0` means success, idempotent add, or doctor warnings only; exit `1` means operational/validation/update failure; and exit `2` means CLI usage error.
 
 Every profile launch starts with:
 
@@ -376,14 +392,16 @@ PIW resolves `pi` from `PATH`, executes `pi --version`, and requires at least `0
 
 ## 9. Entry Update Contract
 
-`piw update` is an explicit user-authorized mutation of valid Entry directories. Detection is recomputed from the current filesystem and stored nowhere.
+`piw update` is an explicit user-authorized mutation of valid, real Entry directories. Detection is recomputed from the current filesystem and stored nowhere. Before Git/npm detection PIW inspects `registryPath`; a top-level symlink returns `external` immediately and PIW MUST NOT inspect or mutate its target.
 
 An Entry has zero, one, or two ordered phases:
 
 ```mermaid
 flowchart TD
-    Entry[Valid Entry realPath] --> Git{Entry itself is Git root?}
-    Entry --> Npm{Root package.json exists?}
+    Entry[Valid Entry registryPath] --> Link{Top-level symlink?}
+    Link -- Yes --> External[external]
+    Link -- No --> Git{Entry itself is Git root?}
+    Link -- No --> Npm{Root package.json exists?}
     Git -- Yes --> G[Git phase]
     Npm -- Yes --> N[npm phase]
     Git -- No --> None{Any phase?}
@@ -441,9 +459,12 @@ superpowers
 
 review
   local unmanaged
+
+pi-worktree
+  external external
 ```
 
-Unmanaged and safe skips do not make `piw update` fail. Any attempted manager failure makes the command exit `1` after unrelated Entries have still been processed.
+External ownership, unmanaged Entries, and safe skips do not make `piw update` fail. External Entries are counted separately and do not count as skipped, unmanaged, or failed. Any attempted manager failure makes the command exit `1` after unrelated Entries have still been processed.
 
 ## 10. Doctor Contract
 
@@ -458,7 +479,7 @@ Unmanaged and safe skips do not make `piw update` fail. Any attempted manager fa
 - profile references and availability when state is valid;
 - Pi executable presence and minimum version;
 - Git and npm command presence; and
-- each valid Entry's update phases, displayed as `git`, `npm`, `git+npm`, or `unmanaged`.
+- each valid Entry's ownership/update phases, displayed as `external`, `git`, `npm`, `git+npm`, or `unmanaged`.
 
 Missing or incompatible Pi, invalid state, root violations, invalid Entries, and unavailable profiles are errors. Missing optional Git/npm executables are warnings and do not alone make doctor exit nonzero. Doctor never pulls, updates dependencies, initializes state, writes files, or repairs anything.
 
@@ -466,7 +487,7 @@ Missing or incompatible Pi, invalid state, root violations, invalid Entries, and
 
 Pi extensions execute with the user's permissions, skills can instruct an agent to perform arbitrary actions, and npm/Git update commands can execute manager-defined behavior. PIW is not a sandbox or trust verifier.
 
-PIW uses direct argument arrays without shell interpolation, never downloads missing resources during discovery or launch, never executes Entry code during validation, preserves Pi project-trust behavior, and fails visibly when classification or launch representation is ambiguous.
+PIW uses direct argument arrays without shell interpolation. `piw add` validates package identities and invokes the resolved Pi executable with `['install', 'npm:<package>']` and `shell: false`. PIW never downloads missing resources during discovery or launch, never executes Entry code during validation, preserves Pi project-trust behavior, and fails visibly when classification or launch representation is ambiguous.
 
 ## 12. Product Invariants
 
@@ -482,15 +503,17 @@ PIW uses direct argument arrays without shell interpolation, never downloads mis
 10. Themes are made available, not activated.
 11. Pass-through arguments cannot override the profile resource set.
 12. PIW replaces itself with Pi and disappears.
-13. Git and npm update phases are independent but ordered for safety.
-14. PIW stores no updater or provenance metadata.
-15. Pi remains final authority on all Pi resource semantics.
+13. A top-level symlink Entry is external and `piw update` never inspects or mutates its target.
+14. Git and npm update phases for real Entry directories are independent but ordered for safety.
+15. `piw add` asks Pi to install only when absent, creates one symlink, and never changes Profile state.
+16. PIW stores no updater, package-registration, source, or provenance metadata.
+17. Pi remains final authority on all Pi package lifecycle and resource semantics.
 
 ## 13. Acceptance Scenarios
 
 Conformance requires at least:
 
-1. First mutating use creates only the PIW root and minimal state, preserving existing content.
+1. First profile-mutating use creates only the PIW root and minimal state, preserving existing content; first-use `add` creates the root and link without state.
 2. `list` and `doctor` do not initialize missing state.
 3. `piw.json` and hidden items never become Entries.
 4. A loose root file is diagnosed and never classified as an Entry.
@@ -508,9 +531,13 @@ Conformance requires at least:
 16. A corrupt or unverifiable root Git marker prevents npm mutation for that Entry.
 17. A Git subdirectory never pulls the parent repository and may still run its own npm phase.
 18. One Entry failure does not stop later Entries.
-19. Doctor reports missing Pi as an error but optional missing managers as warnings.
-20. Smoke tests use an isolated fake Pi and verify the exact extension argv.
-21. Successful launch uses `process.execve()` rather than supervision.
+19. `piw add foo` and `piw add @scope/foo` install only when absent, verify the managed directory, and create an absolute basename symlink without changing state.
+20. A correct existing package link is idempotent; every conflicting or broken root object fails without replacement.
+21. A symlink target containing Git/npm markers is external; neither manager is inspected or executed.
+22. Doctor reports valid symlinks as external and broken symlinks as errors.
+23. Doctor reports missing Pi as an error but optional missing managers as warnings.
+24. Smoke tests use an isolated fake Pi and verify add behavior plus exact extension argv.
+25. Successful launch uses `process.execve()` rather than supervision.
 
 ## 14. Deferred Beyond v1.0
 
@@ -522,6 +549,6 @@ Conformance requires at least:
 - package resource filtering or package semantic validation;
 - filesystem watchers, daemons, databases, or new config formats;
 - machine-readable output;
-- integration with Pi's own package installer/update state;
+- Git/local/URL package sources, package aliases, custom Entry IDs, removal, or automatic Pi package updates;
 - PIW self-update; and
 - Windows support.

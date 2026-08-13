@@ -30,7 +30,8 @@ function commandFailure(result: CommandResult, fallback: string): string {
 }
 
 export function createSystemUpdater(dependencies: SystemUpdaterDependencies): {detect: UpdateDetector; execute: UpdateExecutor} {
-  const detect: UpdateDetector = async (entry: ValidEntry): Promise<UpdateStep[]> => {
+  const detect: UpdateDetector = async (entry: ValidEntry) => {
+    if ((await lstat(entry.registryPath)).isSymbolicLink()) return {ownership: "external"};
     const phases: UpdateStep[] = [];
     const gitMarker = await hasGitMarker(entry.realPath);
     const git = await dependencies.findExecutable("git");
@@ -52,7 +53,7 @@ export function createSystemUpdater(dependencies: SystemUpdaterDependencies): {d
     if (await isRegularFile(path.join(entry.realPath, "package.json"))) {
       phases.push({manager: "npm", key: `npm:${entry.realPath}`, cwd: entry.realPath});
     }
-    return phases;
+    return {ownership: "local", phases};
   };
 
   const executeGit = async (step: UpdateStep): Promise<StepResult> => {

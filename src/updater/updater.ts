@@ -12,6 +12,7 @@ export interface UpdateStep {
 export type StepResult =
   | {manager: UpdateManager; status: "updated" | "up-to-date"}
   | {manager: UpdateManager; status: "skipped" | "failed"; reason: string}
+  | {manager: "external"; status: "external"}
   | {manager: "local"; status: "unmanaged"}
   | {manager: "local"; status: "failed"; reason: string};
 
@@ -20,7 +21,11 @@ export interface EntryUpdateResult {
   steps: StepResult[];
 }
 
-export type UpdateDetector = (entry: ValidEntry) => Promise<UpdateStep[]>;
+export type UpdateDetection =
+  | {ownership: "external"}
+  | {ownership: "local"; phases: UpdateStep[]};
+
+export type UpdateDetector = (entry: ValidEntry) => Promise<UpdateDetection>;
 export type UpdateExecutor = (step: UpdateStep) => Promise<StepResult>;
 
 function reason(error: unknown): string {
@@ -31,12 +36,17 @@ export async function runUpdates(entries: readonly ValidEntry[], detect: UpdateD
   const cache = new Map<string, StepResult>();
   const results: EntryUpdateResult[] = [];
   for (const entry of entries) {
-    let phases: UpdateStep[];
-    try { phases = await detect(entry); }
+    let detection: UpdateDetection;
+    try { detection = await detect(entry); }
     catch (cause) {
       results.push({entry, steps: [{manager: "local", status: "failed", reason: reason(cause)}]});
       continue;
     }
+    if (detection.ownership === "external") {
+      results.push({entry, steps: [{manager: "external", status: "external"}]});
+      continue;
+    }
+    const phases = detection.phases;
     if (!phases.length) {
       results.push({entry, steps: [{manager: "local", status: "unmanaged"}]});
       continue;

@@ -157,7 +157,7 @@ An installed release MUST:
 - use atomic replacement for migrated state; and
 - create a recoverable backup before any future destructive or structurally significant migration.
 
-Migration backup files are not active canonical state. Application version `1.0.0` uses state schema version `1`; these version domains are independent. No migration from an earlier public schema is required.
+Migration backup files are not active canonical state. Application version `1.0.1` uses state schema version `1`; these version domains are independent. No migration from an earlier public schema is required.
 
 ---
 
@@ -180,6 +180,7 @@ PIW uses JSON state and therefore requires no database or native database bindin
 External executables are checked only when relevant:
 
 - `pi` is required for profile launch and launch compatibility checks;
+- `pi` is required by `piw add` only when the requested package directory is absent;
 - `git` is optional and required only for Git update phases; and
 - `npm` is optional at Entry-update time and required only for npm update phases.
 
@@ -196,6 +197,7 @@ Preferred form:
 ```ts
 spawn("git", ["-C", root, "pull", "--ff-only"]);
 spawn("npm", ["update", "--json"], { cwd: entryRealPath });
+spawn(piPath, ["install", `npm:${packageName}`], { stdio: "inherit", shell: false });
 ```
 
 Pi launch is not a child-process supervision flow. It uses `process.execve()` exactly as defined by `RPD.md`.
@@ -379,17 +381,19 @@ piw --version
 piw --help
 piw list
 piw doctor
+piw add foo
 piw <test-profile>
 ```
 
 The smoke environment MUST use temporary PIW state or an isolated home directory and MUST NOT read or modify a developer's real `~/.pi/piw/`.
 
-The smoke environment MUST provide an isolated fake `pi` executable that supports `pi --version` and captures launch arguments. The test MUST additionally confirm:
+The smoke environment MUST provide an isolated fake `pi` executable that supports `pi --version`, `pi install npm:foo`, and captures launch/install arguments. The test MUST additionally confirm:
 
 - the `piw` command is available on `PATH` without invoking a shell script manually;
 - invalid JSON produces the RPD-defined error behavior;
 - a future schema version is preserved and rejected;
 - doctor accepts the fake compatible Pi without depending on the runner's global PATH;
+- `piw add foo` installs only when absent, creates the exact absolute managed-store symlink, is idempotent, appears in discovery/doctor as an external package, and leaves `piw.json` byte-for-byte unchanged;
 - a valid launch reaches `process.execve()` with deterministic arguments; and
 - uninstalling the tarball leaves test state and Entry content intact.
 
@@ -421,6 +425,8 @@ Before publishing a stable release:
 
 - [ ] `piw --help` and `piw --version` succeed.
 - [ ] `piw list` and `piw doctor` satisfy their RPD exit-code contract.
+- [ ] `piw add` accepts unscoped/scoped identities and rejects malformed arity, paths, sources, versions, and pass-through arguments.
+- [ ] `piw add` smoke coverage verifies install-on-absence, symlink creation, discovery, external ownership, idempotency, and unchanged state.
 - [ ] First-run initialization preserves pre-existing files.
 - [ ] Invalid and future-version state files are never overwritten.
 - [ ] Selector and configuration TUI start in supported terminals.
@@ -428,6 +434,7 @@ Before publishing a stable release:
 - [ ] Profile validation and deterministic argv compilation work.
 - [ ] Resource pass-through overrides are rejected.
 - [ ] Git and npm updater safety cases match the RPD.
+- [ ] Every top-level symlink Entry is external and cannot trigger target Git/npm mutation.
 
 ### Compatibility
 

@@ -2,7 +2,7 @@ import {execFileSync} from "node:child_process";
 import {mkdir, mkdtemp} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import path from "node:path";
-import {assertCommand, assertLaunch, createSmokeEnvironment} from "./smoke-helpers.mjs";
+import {assertAdd, assertCommand, assertLaunch, createSmokeEnvironment} from "./smoke-helpers.mjs";
 
 const root = await mkdtemp(path.join(tmpdir(), "piw-tarball-smoke-"));
 const cache = path.join(root, "npm-cache");
@@ -20,7 +20,8 @@ const fixture = await createSmokeEnvironment(root);
 const executable = path.join(prefix, "node_modules", ".bin", "piw");
 for (const args of [["--version"], ["--help"], ["list"], ["doctor"]]) {
   const result = assertCommand(executable, args, fixture.environment, `installed piw ${args.join(" ")}`);
-  if (args[0] === "--version" && result.stdout.trim() !== "1.0.0") throw new Error(`installed piw --version returned ${result.stdout.trim()}`);
+  if (args[0] === "--version" && result.stdout.trim() !== "1.0.1") throw new Error(`installed piw --version returned ${result.stdout.trim()}`);
 }
+await assertAdd(executable, [], fixture);
 await assertLaunch(executable, [], fixture);
 console.log(`Exact tarball smoke passed in ${root}`);

@@ -76,8 +76,10 @@ export async function runDoctor(home = process.env.HOME, environment: NodeJS.Pro
   for (const candidate of discovery.entries) {
     if (candidate.status !== "valid") continue;
     try {
-      const phases = await updater.detect(candidate);
-      const manager = phases.length ? phases.map(({manager}) => manager).join("+") : "unmanaged";
+      const detection = await updater.detect(candidate);
+      const manager = detection.ownership === "external"
+        ? "external"
+        : detection.phases.length ? detection.phases.map(({manager}) => manager).join("+") : "unmanaged";
       write(`${candidate.id}\t${candidate.kind}\tvalid\t${manager}\t${candidate.registryPath}${candidate.registryPath !== candidate.realPath ? ` -> ${candidate.realPath}` : ""}`);
     } catch (cause) {
       write(`ERROR ${candidate.id}: update detection failed: ${cause instanceof Error ? cause.message : String(cause)}`);
@@ -125,6 +127,6 @@ export async function updateEntries(current: Snapshot): Promise<boolean> {
   }
   const counts = new Map<string, number>();
   for (const {steps} of results) for (const step of steps) counts.set(step.status, (counts.get(step.status) ?? 0) + 1);
-  console.log(`\nUpdated: ${counts.get("updated") ?? 0}  Up-to-date: ${counts.get("up-to-date") ?? 0}  Skipped: ${counts.get("skipped") ?? 0}  Unmanaged: ${counts.get("unmanaged") ?? 0}  Failed: ${counts.get("failed") ?? 0}`);
+  console.log(`\nUpdated: ${counts.get("updated") ?? 0}  Up-to-date: ${counts.get("up-to-date") ?? 0}  External: ${counts.get("external") ?? 0}  Skipped: ${counts.get("skipped") ?? 0}  Unmanaged: ${counts.get("unmanaged") ?? 0}  Failed: ${counts.get("failed") ?? 0}`);
   return (counts.get("failed") ?? 0) > 0;
 }

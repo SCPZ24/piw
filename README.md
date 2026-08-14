@@ -1,119 +1,94 @@
 # piw
 
-A lightweight, filesystem-native profile launcher for [Pi](https://pi.dev/).
+English | [中文](README_CN.md)
 
-PIW owns one file: `~/.pi/piw/piw.json`. Everything else below `~/.pi/piw/` is user-managed. Every non-hidden top-level directory is an Entry, and a profile is simply a set of Entry IDs.
+An ultra-lightweight [Pi](https://pi.dev/) profile manager.
 
-```text
-~/.pi/piw/
-├── piw.json
-├── worktree/                 # extension Entry
-│   └── index.ts
-├── superpowers/              # skill Entry
-│   ├── SKILL.md
-│   └── references/
-├── review/                   # prompt-template Entry
-│   └── review.md
-├── tokyo-night/              # theme Entry
-│   └── tokyo-night.json
-└── frontend-kit/             # Pi package Entry
-    ├── package.json
-    ├── extensions/
-    └── skills/
-```
+Pi stores all plugins in `~/.pi/agent/extensions/` and `~/.pi/agent/npm`. When Pi is started with the default `pi` command, it loads every plugin, even if some of them are not needed for the current task.
 
-There is no `entries/` layer and no kind-based registry hierarchy. PIW never copies, moves, or deletes Entry content. Pi owns Pi package installation and updates; PIW can expose an installed package through one top-level symlink.
+piw lets you group Pi plugins with different capabilities into separate Pi profiles. Each profile is a preset combination of Pi runtime features.
 
-## Requirements
-
-- Node.js 22.19.0 or newer
-- Pi 0.83.0 or newer
-- macOS or Linux
-
-## Install
+## Installation
 
 ```bash
 npm install -g @scpz24/piw
 ```
 
-## Profiles
+Requirements:
 
-Create `~/.pi/piw/piw.json` directly or use `piw config`:
+- Node.js ≥ 22.19.0
+- Pi ≥ 0.83.0
+- macOS / Linux
 
-```json
-{
-  "version": 1,
-  "profiles": {
-    "builder": {
-      "entries": [
-        "worktree",
-        "superpowers",
-        "review"
-      ]
-    }
-  }
-}
-```
+## Usage
 
-PIW recognizes five canonical directory forms:
-
-| Entry | Required root shape | Pi launch argument |
-|---|---|---|
-| Extension | `index.ts` or `index.js` | `-e <entry>/index.ts\|index.js` |
-| Skill | `SKILL.md` | `--skill <entry>` |
-| Prompt template | `<entry-id>.md` | `--prompt-template <entry>/<id>.md` |
-| Theme | `<entry-id>.json` | `--theme <entry>/<id>.json` |
-| Pi package | `package.json#pi` or a convention directory | `-e <entry>` |
-
-Package internals remain opaque to PIW. Pi applies package rules and remains the final authority on every resource's complete semantics.
-
-## Add a Pi package Entry
-
-Use `piw add` for an npm-distributed Pi package:
+### Launch
 
 ```bash
-piw add @narumitw/pi-worktree
+piw
 ```
 
-PIW asks Pi to install the package only when it is absent, then creates:
+Select a profile to launch Pi with the corresponding configuration.
+
+Alternatively, launch a profile directly:
+
+```bash
+piw <profile>
+```
+
+### Add an Entry
+
+Pi supports five types of runtime components:
+
+- Extensions
+- Themes
+- Prompt templates
+- Skills
+- Packages (bundles containing the four component types above)
+
+piw treats every component as an Entry and stores it in `~/.pi/piw`.
+
+How to add Entries:
+
+For extensions, themes, prompt templates, and skills, **place them directly in `~/.pi/piw`**.
+
+For packages, piw does not place npm packages directly in this directory. Instead, it uses `pi install` to install the package in Pi's package directory, then creates an **Entry as a symbolic link** to it.
+
+To add a package:
+
+```bash
+piw add <package_name>
+```
+
+piw first checks whether Pi has already installed the package. If not, it installs the package before automatically creating the symbolic link.
+
+Example `piw/` directory structure:
 
 ```text
-~/.pi/piw/pi-worktree
-→ ~/.pi/agent/npm/node_modules/@narumitw/pi-worktree
+~/.pi/piw/
+├── piw.json
+├── worktree/
+│   └── index.ts
+├── superpowers/
+│   └── SKILL.md
+├── review/
+│   └── review.md
+├── tokyo-night/
+│   └── tokyo-night.json
+└── [symlink] pi-web-access
 ```
 
-The npm scope is omitted from the flat Entry ID. The symlink is the complete registry artifact: `piw add` creates no package metadata and does not create or modify `piw.json`. Run `piw config` afterward if you want to include the new Entry in a Profile.
+`piw.json` is the only state file maintained by piw. It records which Entries belong to each profile.
 
-Pi continues to own package freshness, updates, configuration, and removal. A symlink Entry is externally managed and is always skipped by `piw update`. Creating the same link manually remains valid because the filesystem is still the registry.
+### Configuration
 
-## Commands
+Run:
 
-```text
-piw                              select a profile interactively
-piw builder                      launch a profile directly
-piw builder -- --model x/y       pass non-resource arguments to Pi
-piw config                       configure profiles
-piw add @scope/package           install/link an npm Pi package as an Entry
-piw list                         inspect Entries and profiles
-piw doctor                       run read-only diagnostics
-piw update                       run Entry-local Git/npm update phases
+```bash
+piw config
 ```
 
-For a profile run PIW first supplies:
+to open the profile control panel.
+You can add or remove profiles here.
 
-```text
---no-extensions
---no-skills
---no-prompt-templates
---no-themes
-```
-
-It then explicitly loads the selected Entries and replaces itself with Pi using `process.execve()`. Resource flags after `--` are rejected, so the profile remains the sole authority over the runtime resource set. Model, provider, session, tool, trust, message, and other non-resource arguments remain pass-through.
-
-`piw update` is intentionally simple. A real top-level Entry directory that is itself a safe Git worktree root may receive `git pull --ff-only`; one with a root `package.json` may receive `npm update`. A Git+npm Entry runs Git first and runs npm only after Git completes safely. A top-level symlink Entry is external and skipped before target inspection. PIW stores no updater metadata and PIW itself is updated with npm, not `piw update`.
-
-## Security
-
-PIW performs minimal structural availability checks, not sandboxing or trust verification. Extensions execute with your permissions, skills can direct an agent to act, and Git/npm updates can run manager-defined behavior. Review every Entry before launching or updating it.
-
-The complete v1.0 behavior contract is in [docs/RPD.md](docs/RPD.md); release policy is in [docs/release.md](docs/release.md).
+Select and press `Enter` to go into a profile's detail panel, where you can select which features the profile should include.

@@ -1,10 +1,10 @@
 # PIW — Requirements & Product Design
 
-> Status: v1.0 release contract
+> Status: Next-release contract — Pi 1.0 adaptation (implementation pending)
 >
 > Product name: `piw`
 >
-> Scope: Lightweight filesystem-native profile launcher for Pi
+> Scope: Lightweight resource profile launcher for Pi >=1.0.0, distributed as the standalone npm CLI `@scpz24/piw`
 >
 > Product-contract authority: This document is the canonical source for PIW product behavior. `release.md` defines distribution and release policy only.
 
@@ -16,24 +16,27 @@ PIW is a deliberately small profile launcher for Pi:
 
 ```mermaid
 flowchart LR
-    FS[Filesystem] --> Entries[Discover Entries]
+    FS[Filesystem] --> Entries[Available Entries]
+    Builtin["Known Pi built-in IDs"] --> Entries
     Entries --> Profiles["Profile = Set&lt;EntryId&gt;"]
     Profiles --> Validate[Validate basic availability]
     Validate --> Args[Compile Pi argv]
     Args --> Exec[execve Pi]
 ```
 
-The filesystem is the source of truth for Entries. `~/.pi/piw/piw.json` is the only PIW-owned persistent file. PIW validates only enough to decide how an Entry must be represented on Pi's command line. Pi remains the final authority on resource semantics.
+The filesystem is the source of truth for filesystem Entries; a small static catalog supplies Pi built-in extension IDs. `~/.pi/piw/piw.json` is the only PIW-owned persistent file. PIW validates only enough to decide how an Entry must be represented on Pi's command line. Pi remains the final authority on resource semantics.
+
+PIW is a standalone launcher, not a Pi extension and not embedded in Pi. It uses Pi's public CLI only; it does not import Pi internals or maintain a Pi SDK dependency.
 
 PIW is not another Pi Agent Home, package manager, dependency resolver, package provenance system, replacement resource validator, daemon, or supervisor. `piw add` is only a bridge that asks Pi to install an npm package and exposes Pi's managed directory as a filesystem Entry.
 
 ## 2. Goals and Non-Goals
 
-PIW v1.0 SHALL:
+PIW SHALL:
 
 - provide named profiles without duplicating Pi Agent Homes;
 - expose extensions, skills, prompt templates, themes, and Pi packages through one flat Entry abstraction;
-- derive every Entry from a top-level directory or directory symlink below `~/.pi/piw/`;
+- derive filesystem Entries from top-level directories or directory symlinks below `~/.pi/piw/`, and expose known `builtin:` IDs without filesystem artifacts;
 - keep profiles as deterministic sets of Entry IDs;
 - keep broken profiles visible while preventing them from launching;
 - disable Pi's automatic discovery for PIW-managed resource classes and explicitly load the selected resources;
@@ -41,23 +44,24 @@ PIW v1.0 SHALL:
 - support conservative Entry-local Git and npm updates when explicitly invoked; and
 - replace itself with Pi through `process.execve()`.
 
-PIW v1.0 SHALL NOT:
+PIW SHALL NOT:
 
 - replace or redirect `~/.pi/agent`;
 - install, copy, move, rename, delete, repair, normalize, or vendor Entry content;
-- maintain Entry metadata, source metadata, dependency graphs, manager metadata, caches, or last-update state;
+- persist Entry metadata, source metadata, dependency graphs, manager metadata, caches, or last-update state;
 - clone Git repositories or install Entry contents itself;
 - interpret, expand, validate, or filter the internal resources of a Pi package;
 - execute or import extension code during validation;
 - duplicate Pi's complete skill, prompt, theme, extension, or package validators;
 - select or persist an active theme;
 - provide profile inheritance, aliases, groups, project-local profiles, or machine-readable output;
+- manage MCP servers, credentials, tool activation, model routing, or built-in extension dependencies;
 - supervise Pi after launch; or
 - update the PIW executable through `piw update`.
 
 ## 3. Filesystem and Ownership Contract
 
-PIW v1.0 uses one flat root:
+PIW uses one flat root for filesystem Entries:
 
 ```text
 ~/.pi/piw/
@@ -92,7 +96,7 @@ On first profile-mutating use PIW MAY create `~/.pi/piw/` and a minimal `piw.jso
 
 Everything other than `piw.json` under the root is user-managed. Except for an explicitly requested `piw update`, PIW MUST NOT write Entry content. PIW never writes hidden metadata beside Entries.
 
-### 3.1 Directory-Only Entries
+### 3.1 Directory-Only Filesystem Entries
 
 Every non-hidden top-level directory is an Entry candidate. Entry ID is its basename. Nested objects remain opaque content of that Entry and never become separate Entries.
 
@@ -125,35 +129,41 @@ The unreleased historical `/entries` layout receives no migration, dual scanning
 
 ## 4. Persistent State Contract
 
-The v1 state schema remains:
+The next release writes v2 and accepts existing v1 state:
 
 ```ts
-interface PiwStateV1 {
-  version: 1;
+interface PiwStateV2 {
+  version: 2;
   profiles: Record<string, {
     entries: string[];
   }>;
 }
 ```
 
-Minimal state:
+Example:
 
 ```json
 {
-  "version": 1,
-  "profiles": {}
+  "version": 2,
+  "profiles": {
+    "dev": {"entries": ["worktree"]},
+    "research": {"entries": ["builtin:codemode", "builtin:mcp"]}
+  }
 }
 ```
 
 Rules:
 
-- State is UTF-8 JSON with exactly `version` and `profiles` at top level.
-- A profile has exactly one `entries` array.
-- `version` is exactly `1`; future versions fail safely and are never rewritten.
-- Profile names and Entry IDs match `^[a-z0-9][a-z0-9_-]{0,63}$`.
-- Reserved profile names are `add`, `config`, `update`, `list`, `doctor`, `help`, and `version`.
+- State is UTF-8 JSON with exactly `version` and `profiles` at top level; each profile has exactly one `entries` array.
+- New state and explicit configuration saves use version `2`; versions greater than `2` fail safely and are never rewritten.
+- Existing v1 state is validated using its original rules and normalized to v2 in memory. Reading, launching, listing, diagnosing, updating, or cancelling configuration MUST NOT rewrite it. The next explicit configuration save uses the existing atomic write path. Profile names and membership are preserved; no built-ins are automatically selected.
+- Profile names and filesystem Entry IDs still match `^[a-z0-9][a-z0-9_-]{0,63}$`.
+- v2 additionally accepts Entry references matching `^builtin:[a-z0-9][a-z0-9._-]{0,63}$`. This syntax does not make an unknown built-in available; unknown references remain visible and removable and prevent that profile from launching.
+- Reserved profile names remain `add`, `config`, `update`, `list`, `doctor`, `help`, and `version`.
 - Profile Entry IDs are unique and normalized into deterministic natural order.
 - State MUST NOT store Entry paths, kinds, launch paths, source or updater metadata, timestamps, caches, or active theme.
+
+The version change marks the new reference semantics; old PIW releases reject v2 instead of attempting to interpret it. State version and npm package version are independent.
 
 State writes validate and serialize the new value, write and flush a unique temporary file beside `piw.json`, compare the current file fingerprint with the one loaded by the configuration UI, then atomically rename. This is atomic replacement with optimistic stale-write detection, not a database, daemon, mutex, or distributed locking system.
 
@@ -162,20 +172,22 @@ State writes validate and serialize the new value, write and flush a unique temp
 ```ts
 type EntryKind = "extension" | "skill" | "prompt" | "theme" | "package";
 
-interface EntryBase {
-  id: string;
-  registryPath: string;
-  realPath: string;
-  diagnostics: Diagnostic[];
-}
+type EntrySource =
+  | {source: "filesystem"; registryPath: string; realPath: string}
+  | {source: "builtin"};
 
-interface ValidEntry extends EntryBase {
+type EntryBase = EntrySource & {
+  id: string;
+  diagnostics: Diagnostic[];
+};
+
+type ValidEntry = EntryBase & {
   status: "valid";
   kind: EntryKind;
   launchPath: string;
 }
 
-interface InvalidEntry extends EntryBase {
+type InvalidEntry = EntryBase & {
   status: "invalid";
   kind?: EntryKind;
   launchPath?: string;
@@ -184,13 +196,13 @@ interface InvalidEntry extends EntryBase {
 type Entry = ValidEntry | InvalidEntry;
 ```
 
-This model is reconstructed from the live filesystem and never persisted. A package is one opaque Entry even when it contains many Pi resources.
+This model is reconstructed from the live filesystem and the static built-in catalog and never persisted. Built-in Entries always have kind `extension`; `launchPath` is their literal `builtin:<name>` specifier, not a filesystem path. They have no `registryPath` or `realPath`. A package is one opaque Entry even when it contains many Pi resources.
 
-Entry IDs share one flat namespace, are checked case-insensitively for collisions, and use the directory or symlink basename without transformation. Every colliding candidate is invalid.
+Filesystem Entry IDs share one flat namespace, are checked case-insensitively for collisions, and use the directory or symlink basename without transformation. Every colliding candidate is invalid. The reserved `builtin:` prefix cannot collide with a legal filesystem Entry ID.
 
 ## 6. Discovery and Classification
 
-PIW resolves each candidate to a directory and applies this precedence:
+PIW resolves each filesystem candidate to a directory and applies this precedence:
 
 ```mermaid
 flowchart TD
@@ -316,9 +328,24 @@ Without a package signal, the loose-resource signals are `SKILL.md`, `index.ts`/
 
 Text validation uses fatal UTF-8 decoding. PIW asks only whether it can confidently determine the CLI representation; deeper legality remains Pi's responsibility.
 
+### 6.7 Built-in Extension Entries
+
+Expose exactly these known Pi 1.0 extension IDs in the existing Entry catalog:
+
+- `builtin:mcp`
+- `builtin:codemode`
+- `builtin:tool-search`
+- `builtin:llama.cpp`
+
+Each is a selectable `extension` with source `builtin` and compiles to `-e <id>`. No directory, symlink, downloaded code, installed-package scan, or Pi-internal discovery is involved. New official IDs require a catalog update; syntactically valid unknown IDs are unresolved references.
+
+Selecting an extension requests loading only. Tool activation, MCP exposure, server configuration, model selection, and interactions with other extensions remain Pi's responsibility. PIW does not auto-select companion extensions or infer dependencies. For example, loading MCP does not implicitly select Codemode or tool-search in the Profile.
+
+Pi 1.0 documents these IDs and the effect of `--no-extensions` in its [settings reference](https://github.com/earendil-works/pi/blob/v1.0.0/packages/coding-agent/docs/settings.md#resources). Tool selection remains separate under the [public CLI](https://github.com/earendil-works/pi/blob/v1.0.0/packages/coding-agent/docs/cli.md#tool-options).
+
 ## 7. Profiles and TUI
 
-A profile is only a named set of Entry IDs. Membership has no user-controlled ordering and is normalized using deterministic ASCII natural order. Empty profiles are valid and represent a clean Pi resource mode.
+A profile is only a named set of Entry IDs. Membership has no user-controlled ordering and is normalized using deterministic ASCII natural order. Empty profiles are valid and select no managed resources, including built-in extensions. This is resource selection, not a separate Pi configuration environment or security boundary.
 
 A profile is available only when every referenced ID resolves to a valid Entry. Missing and invalid references:
 
@@ -331,6 +358,8 @@ A profile is available only when every referenced ID resolves to a valid Entry. 
 The profile selector preserves natural ordering, Up/Down navigation, Enter for an available profile, and `q`/Escape cancellation. Unavailable profiles are dimmed and explain their diagnostics.
 
 The configuration TUI preserves profile create, rename, confirmed delete, and Entry membership multi-select. It writes only `piw.json`. Invalid Entries cannot be newly selected; previously referenced missing or invalid IDs remain visible and removable.
+
+Built-in Entries appear in the same membership list, labelled `Pi built-in`, with no default selection. The UI states: “Loads the extension; tool activation is controlled by Pi.” Existing profile operations and ordering remain unchanged; no MCP-specific or model-specific screen is added. `piw list` shows a built-in's literal ID in place of a filesystem location.
 
 ## 8. CLI and Launch Contract
 
@@ -365,7 +394,8 @@ Then valid Entries are emitted in natural ID order:
 
 | Kind | Pi arguments |
 |---|---|
-| extension | `-e <entry>/index.ts\|index.js` |
+| extension (filesystem) | `-e <entry>/index.ts\|index.js` |
+| extension (builtin) | `-e builtin:<name>` |
 | skill | `--skill <entry-directory>` |
 | prompt | `--prompt-template <entry>/<id>.md` |
 | theme | `--theme <entry>/<id>.json` |
@@ -388,11 +418,13 @@ Arguments after an explicit `--` are appended exactly without shell parsing, exc
 --no-themes
 ```
 
-PIW resolves `pi` from `PATH`, executes `pi --version`, and requires at least `0.83.0`. It then calls `process.execve()` with the absolute Pi executable, `['pi', ...compiledArgs]`, and the current environment. PIW does not use a shell, change cwd, replace stdio, spawn a supervisor, or fall back to supervision.
+PIW resolves `pi` from `PATH`, executes `pi --version`, and requires at least `1.0.0`. No per-extension version probing or pre-1.0 compatibility branch is added. It then calls `process.execve()` with the absolute Pi executable, `['pi', ...compiledArgs]`, and the current environment. PIW does not use a shell, change cwd, replace stdio, spawn a supervisor, or fall back to supervision.
+
+PIW never generates `--tools`, `--exclude-tools`, or tool-selection settings from Entry membership. Non-resource options remain exact pass-through arguments. `piw <profile> -- -e builtin:mcp` remains a usage error; built-ins must be selected in the Profile. Switching profiles does not rewrite Pi settings, MCP configuration, or credentials, and does not redirect the Pi Agent Home.
 
 ## 9. Entry Update Contract
 
-`piw update` is an explicit user-authorized mutation of valid, real Entry directories. Detection is recomputed from the current filesystem and stored nowhere. Before Git/npm detection PIW inspects `registryPath`; a top-level symlink returns `external` immediately and PIW MUST NOT inspect or mutate its target.
+`piw update` is an explicit user-authorized mutation of valid, real Entry directories. Built-in Entries are excluded before filesystem or updater inspection; they are maintained with Pi itself and add no update phases or result counts. Detection is recomputed from the current filesystem and stored nowhere. Before Git/npm detection PIW inspects `registryPath`; a top-level symlink returns `external` immediately and PIW MUST NOT inspect or mutate its target.
 
 An Entry has zero, one, or two ordered phases:
 
@@ -479,7 +511,7 @@ External ownership, unmanaged Entries, and safe skips do not make `piw update` f
 - profile references and availability when state is valid;
 - Pi executable presence and minimum version;
 - Git and npm command presence; and
-- each valid Entry's ownership/update phases, displayed as `external`, `git`, `npm`, `git+npm`, or `unmanaged`.
+- each valid filesystem Entry's ownership/update phases, displayed as `external`, `git`, `npm`, `git+npm`, or `unmanaged`; built-ins are labelled `Pi built-in` without filesystem or updater inspection.
 
 Missing or incompatible Pi, invalid state, root violations, invalid Entries, and unavailable profiles are errors. Missing optional Git/npm executables are warnings and do not alone make doctor exit nonzero. Doctor never pulls, updates dependencies, initializes state, writes files, or repairs anything.
 
@@ -493,9 +525,9 @@ PIW uses direct argument arrays without shell interpolation. `piw add` validates
 
 1. `~/.pi/piw/piw.json` is PIW's only canonical persistent file.
 2. Every non-hidden top-level directory is an Entry candidate; Entries are never loose files.
-3. Entry ID is the top-level directory or symlink basename.
+3. A filesystem Entry ID is its top-level directory or symlink basename; a built-in Entry ID is its public `builtin:` specifier.
 4. Profiles contain only Entry IDs.
-5. Entry registry state is reconstructed from the filesystem on every run.
+5. Entries are reconstructed from the filesystem plus a static built-in catalog on every run.
 6. Package signal has precedence and package internals remain opaque.
 7. Validation stops once PIW can confidently choose the Pi CLI argument.
 8. A broken profile remains visible but cannot launch.
@@ -538,6 +570,11 @@ Conformance requires at least:
 23. Doctor reports missing Pi as an error but optional missing managers as warnings.
 24. Smoke tests use an isolated fake Pi and verify add behavior plus exact extension argv.
 25. Successful launch uses `process.execve()` rather than supervision.
+26. Each selected built-in compiles to its exact `-e builtin:<name>` argument; unselected built-ins are not requested, and no companion extension or tool option is automatically appended.
+27. v1 state loads without changing disk bytes or profile membership; explicit save writes v2; invalid and future schemas fail safely.
+28. Unknown built-in references remain visible and removable and make only their profiles unavailable.
+29. Built-in Entries never enter filesystem validation or updater detection; list and doctor show their source without fake paths.
+30. Pi below `1.0.0` is rejected; non-resource tool options pass through unchanged.
 
 ## 14. Deferred Beyond v1.0
 
@@ -552,3 +589,7 @@ Conformance requires at least:
 - Git/local/URL package sources, package aliases, custom Entry IDs, removal, or automatic Pi package updates;
 - PIW self-update; and
 - Windows support.
+
+## 15. Pi 1.0 Adaptation Delivery
+
+The scoped implementation plan is [pi-1-0-adapt-plan.md](pi-1-0-adapt-plan.md). This document describes the next release; code changes, tests, versioning, and publication remain separate work. The existing custom `PI_CODING_AGENT_DIR` package-path issue is deferred and is not addressed by the built-in catalog.

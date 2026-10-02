@@ -1,12 +1,12 @@
 # PIW Release Policy
 
-> Status: v1.0 release policy
+> Status: Next-release policy — Pi 1.0 baseline (implementation pending)
 >
 > Product: `piw`
 >
 > Distribution: npm only
 >
-> Authority boundary: `RPD.md` defines product, state, CLI, TUI, discovery, validation, launch, and updater behavior. This document defines packaging, compatibility, versioning, and publication policy.
+> Authority boundary: `PRD.md` defines product, state, CLI, TUI, discovery, validation, launch, and updater behavior. This document defines packaging, compatibility, versioning, and publication policy.
 
 ---
 
@@ -36,12 +36,12 @@ PIW does not provide:
 
 ## 2. Supported Runtime Baseline
 
-PIW v1.0 officially supports:
+The next PIW release officially supports:
 
 | Component | Required baseline |
 |---|---|
 | Node.js | `>=22.19.0` |
-| Pi | `>=0.83.0` |
+| Pi | `>=1.0.0` |
 | Operating system | macOS or Linux |
 | Terminal | Modern ANSI terminal for interactive commands |
 
@@ -119,7 +119,7 @@ Users MUST NOT need a TypeScript runtime or an additional post-install setup ste
 
 ## 5. Product Contract Dependency
 
-The following product behaviors are defined exclusively in `RPD.md` and MUST NOT be independently re-specified here:
+The following product behaviors are defined exclusively in `PRD.md` and MUST NOT be independently re-specified here:
 
 - the fixed registry and state paths;
 - state schema and atomic-write semantics;
@@ -131,13 +131,13 @@ The following product behaviors are defined exclusively in `RPD.md` and MUST NOT
 - Git/npm updater behavior; and
 - error and security behavior.
 
-Release work treats the approved RPD as an input contract. If implementation or packaging requires changing one of those behaviors, the RPD MUST be revised and approved first.
+Release work treats the approved PRD as an input contract. If implementation or packaging requires changing one of those behaviors, the PRD MUST be revised and approved first.
 
 ---
 
 ## 6. State Compatibility and Uninstallation
 
-The npm package lifecycle MUST respect the state ownership contract in `RPD.md`.
+The npm package lifecycle MUST respect the state ownership contract in `PRD.md`.
 
 Installation MAY create PIW-owned directories only when the executable first runs. npm install scripts MUST NOT initialize, migrate, or inspect user state.
 
@@ -184,7 +184,7 @@ External executables are checked only when relevant:
 - `git` is optional and required only for Git update phases; and
 - `npm` is optional at Entry-update time and required only for npm update phases.
 
-A missing optional updater executable disables only its related updates and is reported as specified by the RPD.
+A missing optional updater executable disables only its related updates and is reported as specified by the PRD.
 
 ---
 
@@ -200,7 +200,7 @@ spawn("npm", ["update", "--json"], { cwd: entryRealPath });
 spawn(piPath, ["install", `npm:${packageName}`], { stdio: "inherit", shell: false });
 ```
 
-Pi launch is not a child-process supervision flow. It uses `process.execve()` exactly as defined by `RPD.md`.
+Pi launch is not a child-process supervision flow. It uses `process.execve()` exactly as defined by `PRD.md`.
 
 The installed executable MUST run as:
 
@@ -352,7 +352,7 @@ internal planning documents
 
 Each stable release MUST run launch-contract smoke tests against:
 
-1. Pi `0.83.0`, the minimum supported version; and
+1. Pi `1.0.0`, the minimum supported version; and
 2. the latest stable Pi version at release time.
 
 The smoke test MUST confirm that Pi still supports:
@@ -366,9 +366,9 @@ The smoke test MUST confirm that Pi still supports:
 - `--prompt-template`; and
 - `--theme`.
 
-It MUST also confirm that explicit resources remain available when their corresponding automatic discovery flags are disabled.
+It MUST also confirm that explicit resources remain available when their corresponding automatic discovery flags are disabled, including selected `builtin:` extensions. Built-in loading and tool activation must be asserted separately, as specified in `pi-1-0-adapt-plan.md`.
 
-If the latest Pi release breaks the contract while `0.83.0` still works, publication is blocked until PIW's compatibility policy or implementation is deliberately revised. The releaser MUST NOT silently raise or remove version checks.
+If the latest Pi release breaks the contract while `1.0.0` still works, publication is blocked until PIW's compatibility policy or implementation is deliberately revised. The releaser MUST NOT silently raise or remove version checks.
 
 ---
 
@@ -390,7 +390,7 @@ The smoke environment MUST use temporary PIW state or an isolated home directory
 The smoke environment MUST provide an isolated fake `pi` executable that supports `pi --version`, `pi install npm:foo`, and captures launch/install arguments. The test MUST additionally confirm:
 
 - the `piw` command is available on `PATH` without invoking a shell script manually;
-- invalid JSON produces the RPD-defined error behavior;
+- invalid JSON produces the PRD-defined error behavior;
 - a future schema version is preserved and rejected;
 - doctor accepts the fake compatible Pi without depending on the runner's global PATH;
 - `piw add foo` installs only when absent, creates the exact absolute managed-store symlink, is idempotent, appears in discovery/doctor as an external package, and leaves `piw.json` byte-for-byte unchanged;
@@ -424,7 +424,7 @@ Before publishing a stable release:
 ### Product-contract smoke tests
 
 - [ ] `piw --help` and `piw --version` succeed.
-- [ ] `piw list` and `piw doctor` satisfy their RPD exit-code contract.
+- [ ] `piw list` and `piw doctor` satisfy their PRD exit-code contract.
 - [ ] `piw add` accepts unscoped/scoped identities and rejects malformed arity, paths, sources, versions, and pass-through arguments.
 - [ ] `piw add` smoke coverage verifies install-on-absence, symlink creation, discovery, external ownership, idempotency, and unchanged state.
 - [ ] First-run initialization preserves pre-existing files.
@@ -433,12 +433,12 @@ Before publishing a stable release:
 - [ ] Missing and incompatible Pi versions produce actionable errors.
 - [ ] Profile validation and deterministic argv compilation work.
 - [ ] Resource pass-through overrides are rejected.
-- [ ] Git and npm updater safety cases match the RPD.
+- [ ] Git and npm updater safety cases match the PRD.
 - [ ] Every top-level symlink Entry is external and cannot trigger target Git/npm mutation.
 
 ### Compatibility
 
-- [ ] The launch contract passes against Pi `0.83.0`.
+- [ ] The launch contract passes against Pi `1.0.0`.
 - [ ] The launch contract passes against the latest stable Pi.
 - [ ] macOS smoke tests pass on a supported Node release.
 - [ ] Linux smoke tests pass on a supported Node release.
@@ -456,7 +456,7 @@ flowchart TD
     Verify --> Registry[npm registry]
     Registry --> Install[npm install -g package]
     Install --> CLI[piw executable]
-    CLI --> Contract[RPD-defined state registry and profiles]
+    CLI --> Contract[PRD-defined state registry and profiles]
     Contract --> Exec[execve Pi]
 ```
 
@@ -468,10 +468,10 @@ flowchart TD
 2. PIW is implemented in TypeScript and publishes compiled ESM JavaScript.
 3. Every package identity exposes one executable named `piw`.
 4. The minimum Node version is `22.19.0`.
-5. The minimum Pi version is `0.83.0`.
+5. The minimum Pi version is `1.0.0`.
 6. Official v1.0 platforms are macOS and Linux.
 7. PIW ships no standalone binary, Homebrew formula, or curl installer.
-8. Product behavior and state semantics come from `RPD.md` and are not duplicated here.
+8. Product behavior and state semantics come from `PRD.md` and are not duplicated here.
 9. PIW itself is updated through npm, never through `piw update`.
 10. Package removal never removes PIW state or registered Entry content.
 11. Runtime dependencies remain lightweight and do not provide native exec replacement.

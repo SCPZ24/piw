@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import {spawn, spawnSync} from "node:child_process";
 import {mkdir, mkdtemp, readFile, realpath, writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
@@ -33,8 +34,9 @@ const skill = path.join(piwHome, "skill-test");
 const prompt = path.join(piwHome, "prompt-test");
 const theme = path.join(piwHome, "theme-test");
 const packageEntry = path.join(piwHome, "package-test");
+const observer = path.join(piwHome, "tool-observer");
 const packageExtension = path.join(packageEntry, "extensions");
-await Promise.all([extension, skill, prompt, theme, packageExtension].map((directory) => mkdir(directory, {recursive: true})));
+await Promise.all([extension, skill, prompt, theme, packageExtension, observer].map((directory) => mkdir(directory, {recursive: true})));
 
 const extensionMarker = path.join(root, "extension-loaded");
 const packageMarker = path.join(root, "package-loaded");
@@ -65,22 +67,43 @@ export default function (pi) {
   pi.registerCommand("package-test", {description: "PIW compatibility package", handler: async () => {}});
 }
 `);
-await writeFile(path.join(piwHome, "piw.json"), `${JSON.stringify({
+const stateFile = path.join(piwHome, "piw.json");
+const legacyState = JSON.stringify({
   version: 1,
   profiles: {
     resources: {entries: ["extension-test", "skill-test", "prompt-test", "theme-test"]},
     package: {entries: ["package-test"]},
   },
-}, null, 2)}\n`);
+}, null, 2) + "\n";
+await writeFile(stateFile, legacyState);
+await writeFile(path.join(observer, "index.ts"), `
+import {writeFileSync} from "node:fs";
+export default function (pi) {
+  pi.on("session_start", () => {
+    writeFileSync(process.env.PIW_COMPAT_TOOLS_MARKER, JSON.stringify({
+      all: pi.getAllTools().map((tool) => tool.name),
+      active: pi.getActiveTools(),
+    }));
+  });
+}
+`);
+const agentDir = path.join(root, "pi-agent");
+await mkdir(agentDir);
+const nativeFixtures = new Map([
+  ["settings.json", JSON.stringify({defaultTools: ["read", "bash", "edit", "write"], enableInstallTelemetry: false}) + "\n"],
+  ["mcp.json", '{"mcpServers":{}}\n'],
+  ["auth.json", '{}\n'],
+]);
+for (const [name, bytes] of nativeFixtures) await writeFile(path.join(agentDir, name), bytes);
 
 const environment = {...process.env};
 for (const name of Object.keys(environment)) {
-  if (/(?:API_KEY|AUTH_TOKEN|OAUTH_TOKEN|BEARER_TOKEN|ACCESS_TOKEN)$/u.test(name)) delete environment[name];
+  if (name.startsWith("PI_") || /(?:API_KEY|AUTH_TOKEN|OAUTH_TOKEN|BEARER_TOKEN|ACCESS_TOKEN)$/u.test(name)) delete environment[name];
 }
 Object.assign(environment, {
   HOME: home,
   PATH: `${path.dirname(piBin)}${path.delimiter}${process.env.PATH ?? ""}`,
-  PI_CODING_AGENT_DIR: path.join(root, "pi-agent"),
+  PI_CODING_AGENT_DIR: agentDir,
   PI_OFFLINE: "1",
   PI_TELEMETRY: "0",
   PIW_COMPAT_EXTENSION_MARKER: extensionMarker,
@@ -91,10 +114,11 @@ const piw = new URL("../dist/cli.js", import.meta.url).pathname;
 const doctor = spawnSync(process.execPath, [piw, "doctor"], {cwd: home, env: environment, encoding: "utf8"});
 if (doctor.status !== 0) throw new Error(`piw doctor rejected real Pi ${installedVersion}:\n${doctor.stdout}\n${doctor.stderr}`);
 
-async function rpcCommands(profile) {
-  const child = spawn(process.execPath, [piw, profile, "--", "--offline", "--mode", "rpc", "--no-session", "--no-context-files"], {
+async function rpcCommands(profile, passthrough = []) {
+  const toolsMarker = path.join(root, `tools-${profile}-${passthrough.length}.json`);
+  const child = spawn(process.execPath, [piw, profile, "--", "--offline", "--mode", "rpc", "--no-session", "--no-context-files", ...passthrough], {
     cwd: home,
-    env: environment,
+    env: {...environment, PIW_COMPAT_TOOLS_MARKER: toolsMarker},
     stdio: ["pipe", "pipe", "pipe"],
   });
   let stdout = "";
@@ -112,19 +136,59 @@ async function rpcCommands(profile) {
   if (code !== 0) throw new Error(`Real Pi ${installedVersion} failed for profile ${profile} (${String(code)}):\nstdout:\n${stdout}\nstderr:\n${stderr}`);
   const response = stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line)).find((message) => message.id === "commands");
   if (!response?.success) throw new Error(`Real Pi ${installedVersion} did not answer get_commands for ${profile}:\n${stdout}\n${stderr}`);
-  return response.data.commands;
+  const observed = profile === "observed-empty" || profile === "codemode" || profile === "tool-search" || profile === "mixed";
+  return {commands: response.data.commands, tools: observed ? JSON.parse(await readFile(toolsMarker, "utf8")) : undefined};
 }
 
-const resourceCommands = await rpcCommands("resources");
+const {commands: resourceCommands} = await rpcCommands("resources");
 const resourceNames = new Set(resourceCommands.map((command) => command.name));
 for (const expected of ["extension-test", "prompt-test", "skill:skill-test"]) {
   if (!resourceNames.has(expected)) throw new Error(`Real Pi ${installedVersion} did not load explicit resource ${expected}`);
 }
 if (String(await readFile(extensionMarker, "utf8")).trim() !== "loaded") throw new Error("Explicit extension did not initialize");
 
-const packageCommands = await rpcCommands("package");
+const {commands: packageCommands} = await rpcCommands("package");
 if (!packageCommands.some((command) => command.name === "package-test")) throw new Error(`Real Pi ${installedVersion} did not load the local package root`);
 if (String(await readFile(packageMarker, "utf8")).trim() !== "loaded") throw new Error("Local package extension did not initialize");
+
+assert.equal(await readFile(stateFile, "utf8"), legacyState, "launch must not rewrite v1 state");
+
+const builtinProfiles = {
+  empty: {entries: []},
+  "observed-empty": {entries: ["tool-observer"]},
+  mcp: {entries: ["builtin:mcp"]},
+  llama: {entries: ["builtin:llama.cpp"]},
+  codemode: {entries: ["builtin:codemode", "tool-observer"]},
+  "tool-search": {entries: ["builtin:tool-search", "tool-observer"]},
+  mixed: {entries: ["builtin:mcp", "builtin:llama.cpp", "builtin:codemode", "builtin:tool-search", "extension-test", "skill-test", "prompt-test", "theme-test", "package-test", "tool-observer"]},
+};
+const builtinState = JSON.stringify({version: 2, profiles: builtinProfiles}) + "\n";
+await writeFile(stateFile, builtinState);
+const cases = [
+  ["empty", [], [], []],
+  ["observed-empty", [], [], []],
+  ["mcp", [], ["mcp"], []],
+  ["llama", [], ["llama"], []],
+  ["codemode", [], [], ["codemode"]],
+  ["tool-search", [], [], ["tool_search"]],
+  ["mixed", [], ["mcp", "llama"], ["codemode", "tool_search"]],
+  ["mixed", ["--tools", "read,bash,edit,write,codemode,tool_search", "--exclude-tools", "bash"], ["mcp", "llama"], ["codemode", "tool_search"]],
+];
+for (const [profile, passthrough, expectedCommands, expectedTools] of cases) {
+  const {commands, tools} = await rpcCommands(profile, passthrough);
+  const names = commands.map((command) => command.name);
+  for (const name of ["mcp", "llama"]) assert.equal(names.includes(name), expectedCommands.includes(name), `${profile}: command ${name}`);
+  for (const name of ["extension-test", "package-test", "prompt-test", "skill:skill-test"]) {
+    assert.equal(names.includes(name), profile === "mixed", `${profile}: local resource ${name}`);
+  }
+  if (tools) {
+    for (const name of ["codemode", "tool_search"]) assert.equal(tools.all.includes(name), expectedTools.includes(name), `${profile}: registered ${name}`);
+    const active = passthrough.length ? ["read", "edit", "write", "codemode", "tool_search"] : ["read", "bash", "edit", "write"];
+    assert.deepEqual([...tools.active].sort(), active.sort(), `${profile}: active tool selection`);
+  }
+}
+assert.equal(await readFile(stateFile, "utf8"), builtinState, "launch must not rewrite v2 state");
+for (const [name, bytes] of nativeFixtures) assert.equal(await readFile(path.join(agentDir, name), "utf8"), bytes, `Pi native ${name} must remain unchanged`);
 
 console.log(JSON.stringify({
   requested: requestedVersion,
@@ -135,5 +199,8 @@ console.log(JSON.stringify({
   theme: "accepted",
   package: "loaded",
   isolationFlags: "accepted",
+  builtins: "selected only",
+  tools: "registered separately from activation; explicit selection preserved",
+  stateAndNativeConfig: "unchanged",
   piwHome: await realpath(piwHome),
 }, null, 2));

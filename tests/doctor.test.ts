@@ -3,8 +3,9 @@ import {tmpdir} from "node:os";
 import path from "node:path";
 import {describe, expect, test} from "vitest";
 import {runDoctor} from "../src/app.js";
+import {getBuiltinEntries} from "../src/registry/builtins.js";
 
-async function fakePi(root: string, version = "0.83.0"): Promise<string> {
+async function fakePi(root: string, version = "1.0.0"): Promise<string> {
   const bin = path.join(root, "bin");
   await mkdir(bin, {recursive: true});
   const executable = path.join(bin, "pi");
@@ -36,7 +37,7 @@ describe("read-only doctor", () => {
     expect(output).toContain("newer than this release supports");
     expect(output).toContain("Unsupported root item: loose.ts");
     expect(output).toContain("Profile checks unavailable");
-    expect(output).toContain("OK pi 0.83.0");
+    expect(output).toContain("OK pi 1.0.0");
     expect(output).toContain("WARN git not found");
     expect(output).toContain("WARN npm not found");
   });
@@ -105,4 +106,23 @@ describe("read-only doctor", () => {
     expect(output).not.toContain("WARN foo");
     expect(output).not.toContain("ERROR foo");
   });
+});
+
+test("doctor resolves builtin references without inspecting them as filesystem entries", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "piw-doctor-builtins-"));
+  const piwHome = path.join(root, ".pi", "piw");
+  await mkdir(piwHome, {recursive: true});
+  await writeFile(path.join(piwHome, "piw.json"), JSON.stringify({version: 2, profiles: {dev: {entries: getBuiltinEntries().map((entry) => entry.id)}}}));
+  const lines: string[] = [];
+  expect(await runDoctor(root, {PATH: await fakePi(root)}, (line) => lines.push(line))).toBe(false);
+  for (const entry of getBuiltinEntries()) expect(lines).toContain(`${entry.id}\textension\tvalid\tPi built-in`);
+});
+
+test("doctor rejects pre-1.0 Pi", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "piw-doctor-old-pi-"));
+  const {ensurePiwHome} = await import("../src/state/state.js");
+  await ensurePiwHome(root);
+  const lines: string[] = [];
+  expect(await runDoctor(root, {PATH: await fakePi(root, "0.99.0")}, (line) => lines.push(line))).toBe(true);
+  expect(lines.join("\n")).toContain("requires Pi >=1.0.0; found 0.99.0");
 });

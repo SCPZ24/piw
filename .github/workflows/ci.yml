@@ -41,7 +41,7 @@ jobs:
   compat-pi:
     strategy:
       matrix:
-        pi: ["0.83.0", "latest"]
+        pi: ["1.0.0", "latest"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -1,4 +1,4 @@
-import {naturalCompare, type Diagnostic, type Entry, type PiwStateV1, type ValidEntry} from "../domain.js";
+import {naturalCompare, type Diagnostic, type Entry, type PiwStateV2, type ValidEntry} from "../domain.js";
 
 export interface ProfileResolution {
   name: string;
@@ -8,7 +8,7 @@ export interface ProfileResolution {
   diagnostics: Diagnostic[];
 }
 
-export function resolveProfiles(state: PiwStateV1, entries: Entry[]): ProfileResolution[] {
+export function resolveProfiles(state: PiwStateV2, entries: Entry[]): ProfileResolution[] {
   const usable = new Map(entries.filter((entry): entry is ValidEntry => entry.status === "valid").map((entry) => [entry.id, entry]));
   const invalid = new Map(entries.filter((entry) => entry.status === "invalid").map((entry) => [entry.id, entry]));
   return Object.entries(state.profiles).map(([name, profile]) => {

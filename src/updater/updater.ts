@@ -1,4 +1,4 @@
-import type {ValidEntry} from "../domain.js";
+import type {ValidFilesystemEntry} from "../domain.js";
 
 export type UpdateManager = "git" | "npm";
 
@@ -17,7 +17,7 @@ export type StepResult =
   | {manager: "local"; status: "failed"; reason: string};
 
 export interface EntryUpdateResult {
-  entry: ValidEntry;
+  entry: ValidFilesystemEntry;
   steps: StepResult[];
 }
 
@@ -25,14 +25,14 @@ export type UpdateDetection =
   | {ownership: "external"}
   | {ownership: "local"; phases: UpdateStep[]};
 
-export type UpdateDetector = (entry: ValidEntry) => Promise<UpdateDetection>;
+export type UpdateDetector = (entry: ValidFilesystemEntry) => Promise<UpdateDetection>;
 export type UpdateExecutor = (step: UpdateStep) => Promise<StepResult>;
 
 function reason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export async function runUpdates(entries: readonly ValidEntry[], detect: UpdateDetector, execute: UpdateExecutor): Promise<EntryUpdateResult[]> {
+export async function runUpdates(entries: readonly ValidFilesystemEntry[], detect: UpdateDetector, execute: UpdateExecutor): Promise<EntryUpdateResult[]> {
   const cache = new Map<string, StepResult>();
   const results: EntryUpdateResult[] = [];
   for (const entry of entries) {

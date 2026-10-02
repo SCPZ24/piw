@@ -2,10 +2,10 @@ import {constants, type Dirent} from "node:fs";
 import {access, readFile, readdir, realpath, stat} from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
-import {naturalCompare, type Diagnostic, type Entry, type EntryKind, validateIdentifier} from "../domain.js";
+import {naturalCompare, type Diagnostic, type InvalidEntry, type ValidFilesystemEntry, type EntryKind, validateIdentifier} from "../domain.js";
 
 export interface DiscoveryResult {
-  entries: Entry[];
+  entries: Array<ValidFilesystemEntry | InvalidEntry>;
   diagnostics: Diagnostic[];
 }
 
@@ -147,7 +147,7 @@ export async function discoverEntries(piwHome: string): Promise<DiscoveryResult>
   const collisions = new Map<string, number>();
   for (const child of candidates) collisions.set(child.name.toLowerCase(), (collisions.get(child.name.toLowerCase()) ?? 0) + 1);
 
-  const entries: Entry[] = [];
+  const entries: Array<ValidFilesystemEntry | InvalidEntry> = [];
   for (const child of candidates) {
     const id = child.name;
     const registryPath = path.join(piwHome, id);
@@ -167,9 +167,9 @@ export async function discoverEntries(piwHome: string): Promise<DiscoveryResult>
     }
     entryDiagnostics.push(...classification.diagnostics);
     if (!entryDiagnostics.length && classification.kind && classification.launchPath) {
-      entries.push({id, registryPath, realPath: real, status: "valid", kind: classification.kind, launchPath: classification.launchPath, diagnostics: []});
+      entries.push({source: "filesystem", id, registryPath, realPath: real, status: "valid", kind: classification.kind, launchPath: classification.launchPath, diagnostics: []});
     } else {
-      entries.push({id, registryPath, realPath: real, status: "invalid", ...(classification.kind ? {kind: classification.kind} : {}), ...(classification.launchPath ? {launchPath: classification.launchPath} : {}), diagnostics: entryDiagnostics});
+      entries.push({source: "filesystem", id, registryPath, realPath: real, status: "invalid", ...(classification.kind ? {kind: classification.kind} : {}), ...(classification.launchPath ? {launchPath: classification.launchPath} : {}), diagnostics: entryDiagnostics});
     }
   }
   return {

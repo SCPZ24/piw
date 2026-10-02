@@ -3,6 +3,7 @@ import {tmpdir} from "node:os";
 import path from "node:path";
 import {describe, expect, test} from "vitest";
 import {discoverEntries} from "../src/registry/discovery.js";
+import {getBuiltinEntries} from "../src/registry/builtins.js";
 
 async function registry(): Promise<string> {
   return await mkdtemp(path.join(tmpdir(), "piw-registry-"));
@@ -108,6 +109,7 @@ describe("directory-only Entry discovery", () => {
     const result = await discoverEntries(root);
 
     expect(result.entries).toEqual([{
+      source: "filesystem",
       id: "pi-worktree",
       registryPath,
       realPath: await realpath(target),
@@ -177,4 +179,10 @@ describe("directory-only Entry discovery", () => {
     expect(result.entries).toHaveLength(2);
     expect(result.entries.every((candidate) => candidate.status === "invalid")).toBe(true);
   });
+});
+
+test("builtin catalog contains only the four literal targets without filesystem paths", () => {
+  expect(getBuiltinEntries()).toEqual(["builtin:codemode", "builtin:llama.cpp", "builtin:mcp", "builtin:tool-search"].map((id) => ({
+    id, source: "builtin", kind: "extension", status: "valid", launchPath: id, diagnostics: [],
+  })));
 });

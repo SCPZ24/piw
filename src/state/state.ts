@@ -2,13 +2,13 @@ import {createHash, randomUUID} from "node:crypto";
 import {constants} from "node:fs";
 import {access, mkdir, open, readFile, rename, unlink} from "node:fs/promises";
 import path from "node:path";
-import {naturalCompare, type PiwStateV1, validateIdentifier, validateProfileName} from "../domain.js";
+import {naturalCompare, type PiwStateV2, validateEntryReference, validateIdentifier, validateProfileName} from "../domain.js";
 
 export class StateValidationError extends Error {}
 export class ConcurrentStateError extends Error {}
 
 export interface PiwPaths {piwHome: string; stateFile: string}
-export interface LoadedState {state: PiwStateV1; fingerprint: string; rawBytes: Uint8Array}
+export interface LoadedState {state: PiwStateV2; fingerprint: string; rawBytes: Uint8Array}
 
 export function getPiwPaths(home: string): PiwPaths {
   const piwHome = path.join(home, ".pi", "piw");
@@ -22,16 +22,16 @@ function exactKeys(value: object, expected: string[], label: string): void {
   }
 }
 
-export function validateState(input: unknown): PiwStateV1 {
+export function validateState(input: unknown): PiwStateV2 {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new StateValidationError("PIW state must be an object");
   exactKeys(input, ["version", "profiles"], "PIW state");
   const record = input as Record<string, unknown>;
-  if (record.version !== 1) {
-    if (typeof record.version === "number" && record.version > 1) throw new StateValidationError(`PIW state version ${record.version} is newer than this release supports`);
-    throw new StateValidationError("PIW state version must be 1");
+  if (record.version !== 1 && record.version !== 2) {
+    if (typeof record.version === "number" && record.version > 2) throw new StateValidationError(`PIW state version ${record.version} is newer than this release supports`);
+    throw new StateValidationError("PIW state version must be 1 or 2");
   }
   if (!record.profiles || typeof record.profiles !== "object" || Array.isArray(record.profiles)) throw new StateValidationError("profiles must be an object");
-  const profiles: PiwStateV1["profiles"] = {};
+  const profiles: PiwStateV2["profiles"] = {};
   const seen = new Set<string>();
   for (const [name, value] of Object.entries(record.profiles)) {
     const validity = validateProfileName(name);
@@ -42,11 +42,11 @@ export function validateState(input: unknown): PiwStateV1 {
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new StateValidationError(`Profile "${name}" must be an object`);
     exactKeys(value, ["entries"], `Profile "${name}"`);
     const entries = (value as {entries?: unknown}).entries;
-    if (!Array.isArray(entries) || entries.some((entry) => typeof entry !== "string" || !validateIdentifier(entry))) throw new StateValidationError(`Profile "${name}" has invalid Entry IDs`);
+    if (!Array.isArray(entries) || entries.some((entry) => typeof entry !== "string" || !(record.version === 1 ? validateIdentifier(entry) : validateEntryReference(entry)))) throw new StateValidationError(`Profile "${name}" has invalid Entry IDs`);
     if (new Set(entries).size !== entries.length) throw new StateValidationError(`Profile "${name}" has duplicate Entry IDs`);
     profiles[name] = {entries: [...entries].sort(naturalCompare)};
   }
-  return {version: 1, profiles: Object.fromEntries(Object.entries(profiles).sort(([a], [b]) => naturalCompare(a, b)))};
+  return {version: 2, profiles: Object.fromEntries(Object.entries(profiles).sort(([a], [b]) => naturalCompare(a, b)))};
 }
 
 function fingerprint(bytes: Uint8Array): string { return createHash("sha256").update(bytes).digest("hex"); }
@@ -60,7 +60,7 @@ export async function ensurePiwHome(home: string): Promise<PiwPaths> {
       if (error.code === "EEXIST") return undefined;
       throw error;
     });
-    if (handle) { await handle.writeFile('{\n  "version": 1,\n  "profiles": {}\n}\n'); await handle.sync(); await handle.close(); }
+    if (handle) { await handle.writeFile('{\n  "version": 2,\n  "profiles": {}\n}\n'); await handle.sync(); await handle.close(); }
   }
   return paths;
 }
@@ -72,7 +72,7 @@ export async function loadState(stateFile: string): Promise<LoadedState> {
   return {state: validateState(parsed), fingerprint: fingerprint(rawBytes), rawBytes};
 }
 
-export async function saveState(stateFile: string, state: PiwStateV1, expectedFingerprint: string): Promise<LoadedState> {
+export async function saveState(stateFile: string, state: PiwStateV2, expectedFingerprint: string): Promise<LoadedState> {
   const normalized = validateState(state);
   const bytes = Buffer.from(`${JSON.stringify(normalized, null, 2)}\n`);
   const temporary = path.join(path.dirname(stateFile), `.piw.json.${process.pid}.${randomUUID()}.tmp`);

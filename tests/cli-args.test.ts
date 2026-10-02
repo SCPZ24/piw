@@ -40,3 +40,9 @@ describe("parsePiwArgs", () => {
     expect(() => parsePiwArgs(argv)).toThrow(CliUsageError);
   });
 });
+
+test("builtin resource overrides remain forbidden while tool selection passes through exactly", () => {
+  expect(() => parsePiwArgs(["dev", "--", "-e", "builtin:mcp"])).toThrow(CliUsageError);
+  const passthrough = ["--tools", "read,bash,edit,write,codemode", "--exclude-tools", "bash"];
+  expect(parsePiwArgs(["dev", "--", ...passthrough])).toEqual({kind: "launch", profile: "dev", passthrough});
+});

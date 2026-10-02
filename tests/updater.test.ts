@@ -1,13 +1,14 @@
-import {mkdir, mkdtemp, realpath, symlink, writeFile} from "node:fs/promises";
+import {mkdir, mkdtemp, readFile, readdir, realpath, symlink, writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import path from "node:path";
 import {describe, expect, test, vi} from "vitest";
-import type {ValidEntry} from "../src/domain.js";
+import type {ValidFilesystemEntry} from "../src/domain.js";
 import {runUpdates, type UpdateDetector, type UpdateExecutor, type UpdateStep} from "../src/updater/updater.js";
 import {createSystemUpdater, type SystemUpdaterDependencies} from "../src/updater/system.js";
+import {getBuiltinEntries} from "../src/registry/builtins.js";
 
-const entry = (id: string, realPath = `/real/${id}`, registryPath = `/registry/${id}`): ValidEntry => ({
-  id, kind: "extension", registryPath, realPath, launchPath: `${realPath}/index.ts`, status: "valid", diagnostics: [],
+const entry = (id: string, realPath = `/real/${id}`, registryPath = `/registry/${id}`): ValidFilesystemEntry => ({
+  source: "filesystem", id, kind: "extension", registryPath, realPath, launchPath: `${realPath}/index.ts`, status: "valid", diagnostics: [],
 });
 
 describe("multi-phase update orchestration", () => {
@@ -238,4 +239,28 @@ describe("system update adapter", () => {
     expect(result?.steps).toEqual([{manager: "external", status: "external"}]);
     expect(execute).not.toHaveBeenCalled();
   });
+});
+
+test("application excludes builtins before update detection and result counting", async () => {
+  const system = await import("../src/updater/system.js");
+  const {snapshot, updateEntries} = await import("../src/app.js");
+  const home = await mkdtemp(path.join(tmpdir(), "piw-update-builtins-"));
+  const piwHome = path.join(home, ".pi", "piw");
+  await mkdir(path.join(piwHome, "local"), {recursive: true});
+  await writeFile(path.join(piwHome, "local", "index.ts"), "export {};\n");
+  const stateFile = path.join(piwHome, "piw.json");
+  const original = '{"version":1,"profiles":{"dev":{"entries":["local"]}}}\n';
+  await writeFile(stateFile, original);
+  const current = await snapshot(home);
+  const detect = vi.spyOn(system, "detectSystemUpdates").mockResolvedValue({ownership: "local", phases: []});
+  const output = vi.spyOn(console, "log").mockImplementation(() => undefined);
+  try {
+    expect(current.entries.filter((entry) => entry.source === "builtin")).toEqual(getBuiltinEntries());
+    expect(await updateEntries(current)).toBe(false);
+    expect(detect).toHaveBeenCalledExactlyOnceWith(current.entries.find((entry) => entry.id === "local"));
+    expect(await readFile(stateFile, "utf8")).toBe(original);
+    expect((await readdir(piwHome)).sort()).toEqual(["local", "piw.json"]);
+    expect(output.mock.calls.flat().join("\n")).not.toContain("builtin:");
+    expect(output.mock.calls.flat().join("\n")).toContain("Unmanaged: 1");
+  } finally { detect.mockRestore(); output.mockRestore(); }
 });

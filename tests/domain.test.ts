@@ -1,5 +1,5 @@
 import {describe, expect, test} from "vitest";
-import {naturalCompare, validateIdentifier, validateProfileName} from "../src/domain.js";
+import {naturalCompare, validateEntryReference, validateIdentifier, validateProfileName} from "../src/domain.js";
 
 describe("identifiers", () => {
   test("accepts the Entry identifier grammar", () => {
@@ -19,4 +19,14 @@ describe("naturalCompare", () => {
     const values = ["profile_a", "profile-10", "profile-2", "x01", "x1"];
     expect(values.sort(naturalCompare)).toEqual(["profile-2", "profile-10", "profile_a", "x01", "x1"]);
   });
+});
+
+test("builtin reference grammar does not relax filesystem or profile names", () => {
+  for (const id of ["builtin:mcp", "builtin:llama.cpp", "builtin:future", "builtin:" + "a".repeat(64)]) {
+    expect(validateEntryReference(id)).toBe(true);
+    expect(validateIdentifier(id)).toBe(false);
+    expect(validateProfileName(id).valid).toBe(false);
+  }
+  for (const id of ["builtin:", "builtin:Upper", "builtin:.foo", "builtin:a/b", "builtin:a:b", "builtin:" + "a".repeat(65), "local.name"]) expect(validateEntryReference(id)).toBe(false);
+  expect(validateEntryReference("local_2")).toBe(true);
 });

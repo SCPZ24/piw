@@ -16,32 +16,48 @@ export interface Diagnostic {
 
 export interface EntryBase {
   id: string;
-  registryPath: string;
-  realPath: string;
   diagnostics: Diagnostic[];
 }
 
-export interface ValidEntry extends EntryBase {
+interface FilesystemSource {
+  source: "filesystem";
+  registryPath: string;
+  realPath: string;
+}
+
+export interface ValidFilesystemEntry extends EntryBase, FilesystemSource {
   status: "valid";
   kind: EntryKind;
   launchPath: string;
 }
 
-export interface InvalidEntry extends EntryBase {
+export interface ValidBuiltinEntry extends EntryBase {
+  source: "builtin";
+  status: "valid";
+  kind: "extension";
+  launchPath: string;
+}
+
+export interface InvalidEntry extends EntryBase, FilesystemSource {
   status: "invalid";
   kind?: EntryKind;
   launchPath?: string;
 }
 
+export type ValidEntry = ValidFilesystemEntry | ValidBuiltinEntry;
 export type Entry = ValidEntry | InvalidEntry;
 
-export interface PiwStateV1 {
-  version: 1;
+export interface PiwStateV2 {
+  version: 2;
   profiles: Record<string, {entries: string[]}>;
 }
 
 export function validateIdentifier(value: string): boolean {
   return IDENTIFIER_PATTERN.test(value);
+}
+
+export function validateEntryReference(value: string): boolean {
+  return validateIdentifier(value) || /^builtin:[a-z0-9][a-z0-9._-]{0,63}$/.test(value);
 }
 
 export function validateProfileName(value: string): {valid: true} | {valid: false; reason: string} {

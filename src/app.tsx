@@ -1,7 +1,8 @@
 import {render} from "ink";
 import React from "react";
 import {stat} from "node:fs/promises";
-import type {Diagnostic, Entry, PiwStateV1, ValidEntry} from "./domain.js";
+import {naturalCompare, type Diagnostic, type Entry, type PiwStateV2, type ValidFilesystemEntry} from "./domain.js";
+import {getBuiltinEntries} from "./registry/builtins.js";
 import {discoverEntries} from "./registry/discovery.js";
 import {ensurePiwHome, getPiwPaths, loadState, saveState, type PiwPaths} from "./state/state.js";
 import {resolveProfiles, type ProfileResolution} from "./profiles/resolve.js";
@@ -11,11 +12,12 @@ import {ConfigApp} from "./tui/config.js";
 import {runUpdates} from "./updater/updater.js";
 import {createSystemUpdater, detectSystemUpdates, executeSystemUpdate} from "./updater/system.js";
 
-export interface Snapshot {paths: PiwPaths; state: PiwStateV1; fingerprint: string; entries: Entry[]; registryDiagnostics: Diagnostic[]; profiles: ProfileResolution[]}
+export interface Snapshot {paths: PiwPaths; state: PiwStateV2; fingerprint: string; entries: Entry[]; registryDiagnostics: Diagnostic[]; profiles: ProfileResolution[]}
 export async function snapshot(home = process.env.HOME, initialize = true): Promise<Snapshot> {
   if (!home) throw new Error("HOME is not set");
   const paths = initialize ? await ensurePiwHome(home) : getPiwPaths(home); const loaded = await loadState(paths.stateFile); const discovery = await discoverEntries(paths.piwHome);
-  return {paths, state: loaded.state, fingerprint: loaded.fingerprint, entries: discovery.entries, registryDiagnostics: discovery.diagnostics, profiles: resolveProfiles(loaded.state, discovery.entries)};
+  const entries = [...discovery.entries, ...getBuiltinEntries()].sort((a, b) => naturalCompare(a.id, b.id));
+  return {paths, state: loaded.state, fingerprint: loaded.fingerprint, entries, registryDiagnostics: discovery.diagnostics, profiles: resolveProfiles(loaded.state, entries)};
 }
 
 export async function launch(profileName: string, passthrough: string[]): Promise<never> {
@@ -27,7 +29,7 @@ export async function launch(profileName: string, passthrough: string[]): Promis
 
 export function printList(current: Snapshot): void {
   console.log("Entries");
-  for (const entry of current.entries) console.log(`${entry.id}\t${entry.kind ?? "unclassified"}\t${entry.status}\t${entry.registryPath}`);
+  for (const entry of current.entries) console.log(`${entry.id}\t${entry.kind ?? "unclassified"}\t${entry.status}\t${entry.source === "builtin" ? entry.id : entry.registryPath}`);
   console.log("\nProfiles");
   for (const profile of current.profiles) console.log(`${profile.name}\t${profile.available ? "ready" : "unavailable"}\t${profile.referencedIds.join(", ")}`);
 }
@@ -37,7 +39,7 @@ export async function runDoctor(home = process.env.HOME, environment: NodeJS.Pro
   if (!home) { write("ERROR HOME is not set"); return true; }
   const paths = getPiwPaths(home);
   let errors = false;
-  let state: PiwStateV1 | undefined;
+  let state: PiwStateV2 | undefined;
   try {
     if (!(await stat(paths.stateFile)).isFile()) throw new Error("piw.json is not a regular file");
     state = (await loadState(paths.stateFile)).state;
@@ -49,11 +51,12 @@ export async function runDoctor(home = process.env.HOME, environment: NodeJS.Pro
   }
 
   const discovery = await discoverEntries(paths.piwHome);
+  const entries = [...discovery.entries, ...getBuiltinEntries()].sort((a, b) => naturalCompare(a.id, b.id));
   for (const diagnostic of discovery.diagnostics) {
     write(`ERROR ${diagnostic.message}`);
     errors = true;
   }
-  for (const candidate of discovery.entries) {
+  for (const candidate of entries) {
     for (const diagnostic of candidate.diagnostics) {
       write(`${diagnostic.severity === "error" ? "ERROR" : "WARN"} ${candidate.id}: ${diagnostic.message}`);
       errors ||= diagnostic.severity === "error";
@@ -61,7 +64,7 @@ export async function runDoctor(home = process.env.HOME, environment: NodeJS.Pro
   }
 
   if (state) {
-    for (const profile of resolveProfiles(state, discovery.entries)) {
+    for (const profile of resolveProfiles(state, entries)) {
       for (const diagnostic of profile.diagnostics) {
         write(`ERROR ${profile.name}: ${diagnostic.message}`);
         errors = true;
@@ -73,8 +76,9 @@ export async function runDoctor(home = process.env.HOME, environment: NodeJS.Pro
 
   const find = async (name: string) => findExecutable(name, environment);
   const updater = createSystemUpdater({findExecutable: find, commandOutput});
-  for (const candidate of discovery.entries) {
+  for (const candidate of entries) {
     if (candidate.status !== "valid") continue;
+    if (candidate.source === "builtin") { write(`${candidate.id}\t${candidate.kind}\tvalid\tPi built-in`); continue; }
     try {
       const detection = await updater.detect(candidate);
       const manager = detection.ownership === "external"
@@ -118,7 +122,7 @@ export async function configure(): Promise<number> {
 }
 
 export async function updateEntries(current: Snapshot): Promise<boolean> {
-  const valid = current.entries.filter((entry): entry is ValidEntry => entry.status === "valid");
+  const valid = current.entries.filter((entry): entry is ValidFilesystemEntry => entry.status === "valid" && entry.source === "filesystem");
   const results = await runUpdates(valid, detectSystemUpdates, executeSystemUpdate);
   console.log("Updating PIW entries\n");
   for (const {entry, steps} of results) {

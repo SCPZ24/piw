@@ -18,7 +18,7 @@ export async function createSmokeEnvironment(root) {
   await writeFile(pi, `#!${process.execPath}
 import {existsSync, mkdirSync, readFileSync, writeFileSync} from "node:fs";
 import path from "node:path";
-if (process.argv[2] === "--version") { console.log("0.83.0"); process.exit(0); }
+if (process.argv[2] === "--version") { console.log("1.0.0"); process.exit(0); }
 if (process.argv[2] === "install") {
   const source = process.argv[3];
   if (source !== "npm:foo") { console.error("unexpected install source"); process.exit(2); }
@@ -72,11 +72,30 @@ export function assertCommand(command, args, environment, label) {
 }
 
 export async function assertLaunch(command, commandPrefix, fixture) {
+  const stateFile = path.join(fixture.piwHome, "piw.json");
+  const before = await readFile(stateFile);
   assertCommand(command, [...commandPrefix, "builder"], fixture.environment, "piw builder");
   const actual = JSON.parse(await readFile(fixture.argsFile, "utf8"));
   const expected = [
     "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes",
     "-e", path.join(await realpath(fixture.browser), "index.ts"),
   ];
+  if (!before.equals(await readFile(stateFile))) throw new Error("Legacy launch modified piw.json");
   if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`fake Pi received wrong argv:\nexpected ${JSON.stringify(expected)}\nactual   ${JSON.stringify(actual)}`);
+}
+
+export async function assertBuiltinLaunch(command, commandPrefix, fixture) {
+  const stateFile = path.join(fixture.piwHome, "piw.json");
+  const bytes = JSON.stringify({version: 2, profiles: {research: {entries: ["builtin:mcp", "browser", "builtin:codemode"]}}}) + "\n";
+  await writeFile(stateFile, bytes);
+  const passthrough = ["--tools", "read,bash,edit,write,codemode", "--exclude-tools", "bash"];
+  assertCommand(command, [...commandPrefix, "research", "--", ...passthrough], fixture.environment, "piw builtin profile");
+  const actual = JSON.parse(await readFile(fixture.argsFile, "utf8"));
+  const expected = [
+    "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes",
+    "-e", path.join(await realpath(fixture.browser), "index.ts"),
+    "-e", "builtin:codemode", "-e", "builtin:mcp", ...passthrough,
+  ];
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`Builtin launch argv mismatch: ${JSON.stringify(actual)}`);
+  if (await readFile(stateFile, "utf8") !== bytes) throw new Error("Builtin launch modified piw.json");
 }

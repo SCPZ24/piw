@@ -49,7 +49,7 @@ async function fixture(packageName = "foo") {
   const entryId = deriveEntryId(packageName);
   const registryPath = path.join(home, ".pi", "piw", entryId);
   const install = vi.fn<AddPackageDependencies["installPackage"]>();
-  const resolvePi = vi.fn<AddPackageDependencies["resolvePi"]>(async () => ({path: "/fake/pi", version: "0.84.1"}));
+  const resolvePi = vi.fn<AddPackageDependencies["resolvePi"]>(async () => ({path: "/fake/pi", version: "1.0.0"}));
   return {home, installedPath, entryId, registryPath, install, resolvePi};
 }
 

@@ -4,6 +4,7 @@ import {expect, test, vi} from "vitest";
 import {render} from "ink-testing-library";
 import {Selector} from "../src/tui/selector.js";
 import {ConfigApp} from "../src/tui/config.js";
+import {getBuiltinEntries} from "../src/registry/builtins.js";
 
 test("selector skips unavailable profiles and selects a ready profile", async () => {
   const selected = vi.fn();
@@ -34,7 +35,7 @@ test("selector visibly dims unavailable profiles", () => {
 
 test("config creates and saves a profile", async () => {
   const save = vi.fn();
-  const view = render(<ConfigApp initial={{version: 1, profiles: {}}} entries={[]} onSave={save} onCancel={() => undefined} />);
+  const view = render(<ConfigApp initial={{version: 2, profiles: {}}} entries={getBuiltinEntries()} onSave={save} onCancel={() => undefined} />);
   view.stdin.write("n");
   await new Promise((resolve) => setTimeout(resolve, 10));
   view.stdin.write("builder");
@@ -43,12 +44,12 @@ test("config creates and saves a profile", async () => {
   await new Promise((resolve) => setTimeout(resolve, 10));
   view.stdin.write("s");
   await new Promise((resolve) => setTimeout(resolve, 20));
-  expect(save).toHaveBeenCalledWith({version: 1, profiles: {builder: {entries: []}}});
+  expect(save).toHaveBeenCalledWith({version: 2, profiles: {builder: {entries: []}}});
 });
 
 test("config asks whether to save, discard, or continue when dirty", async () => {
   const cancel = vi.fn();
-  const view = render(<ConfigApp initial={{version: 1, profiles: {x: {entries: []}}}} entries={[]} onSave={() => undefined} onCancel={cancel} />);
+  const view = render(<ConfigApp initial={{version: 2, profiles: {x: {entries: []}}}} entries={[]} onSave={() => undefined} onCancel={cancel} />);
   view.stdin.write("d");
   await new Promise((resolve) => setTimeout(resolve, 10));
   view.stdin.write("y");
@@ -64,8 +65,8 @@ test("config asks whether to save, discard, or continue when dirty", async () =>
 
 test("config cannot newly select an invalid Entry", async () => {
   const save = vi.fn();
-  const view = render(<ConfigApp initial={{version: 1, profiles: {x: {entries: []}}}} entries={[
-    {id: "bad", registryPath: "/r/bad", realPath: "/r/bad", status: "invalid", diagnostics: [{severity: "error", code: "invalid", message: "bad"}]},
+  const view = render(<ConfigApp initial={{version: 2, profiles: {x: {entries: []}}}} entries={[
+    {source: "filesystem", id: "bad", registryPath: "/r/bad", realPath: "/r/bad", status: "invalid", diagnostics: [{severity: "error", code: "invalid", message: "bad"}]},
   ]} onSave={save} onCancel={() => undefined} />);
   view.stdin.write("\r");
   await new Promise((resolve) => setTimeout(resolve, 10));
@@ -74,12 +75,12 @@ test("config cannot newly select an invalid Entry", async () => {
   await new Promise((resolve) => setTimeout(resolve, 10));
   view.stdin.write("s");
   await new Promise((resolve) => setTimeout(resolve, 10));
-  expect(save).toHaveBeenCalledWith({version: 1, profiles: {x: {entries: []}}});
+  expect(save).toHaveBeenCalledWith({version: 2, profiles: {x: {entries: []}}});
 });
 
 test("config retains a missing reference and lets the user remove it", async () => {
   const save = vi.fn();
-  const view = render(<ConfigApp initial={{version: 1, profiles: {x: {entries: ["gone"]}}}} entries={[]} onSave={save} onCancel={() => undefined} />);
+  const view = render(<ConfigApp initial={{version: 2, profiles: {x: {entries: ["gone"]}}}} entries={[]} onSave={save} onCancel={() => undefined} />);
   view.stdin.write("\r");
   await new Promise((resolve) => setTimeout(resolve, 10));
   expect(view.lastFrame()).toContain("gone missing");
@@ -87,5 +88,43 @@ test("config retains a missing reference and lets the user remove it", async () 
   await new Promise((resolve) => setTimeout(resolve, 10));
   view.stdin.write("s");
   await new Promise((resolve) => setTimeout(resolve, 10));
-  expect(save).toHaveBeenCalledWith({version: 1, profiles: {x: {entries: []}}});
+  expect(save).toHaveBeenCalledWith({version: 2, profiles: {x: {entries: []}}});
+});
+
+test("cancelling config after loading v1 leaves original bytes untouched", async () => {
+  const {mkdtemp, readFile, writeFile} = await import("node:fs/promises");
+  const {tmpdir} = await import("node:os");
+  const {join} = await import("node:path");
+  const {ensurePiwHome, loadState, saveState} = await import("../src/state/state.js");
+  const paths = await ensurePiwHome(await mkdtemp(join(tmpdir(), "piw-cancel-")));
+  const original = '{"version":1,"profiles":{"dev":{"entries":[]}}}\n';
+  await writeFile(paths.stateFile, original);
+  const loaded = await loadState(paths.stateFile);
+  const cancel = vi.fn();
+  const save = vi.fn(async (state: typeof loaded.state) => { await saveState(paths.stateFile, state, loaded.fingerprint); });
+  const view = render(<ConfigApp initial={loaded.state} entries={[]} onSave={save} onCancel={cancel} />);
+  view.stdin.write("q");
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(cancel).toHaveBeenCalledOnce();
+  expect(save).not.toHaveBeenCalled();
+  expect(await readFile(paths.stateFile, "utf8")).toBe(original);
+  view.unmount();
+});
+
+test("config labels builtins, selects only MCP, and removes an unknown builtin", async () => {
+  const save = vi.fn();
+  const view = render(<ConfigApp initial={{version: 2, profiles: {dev: {entries: ["builtin:future"]}}}} entries={getBuiltinEntries()} onSave={save} onCancel={() => undefined} />);
+  const press = async (key: string) => { view.stdin.write(key); await new Promise((resolve) => setTimeout(resolve, 10)); };
+  await press("\r");
+  expect(view.lastFrame()).toContain("[ ] builtin:mcp extension (Pi built-in)");
+  expect(view.lastFrame()).toContain("Loads the extension; tool activation is controlled by Pi.");
+  await press("\u001b[B");
+  expect(view.lastFrame()).toContain("> [!] builtin:future missing");
+  await press(" ");
+  await press("\u001b[B");
+  expect(view.lastFrame()).toContain("> [ ] builtin:mcp");
+  await press(" ");
+  await press("s");
+  expect(save).toHaveBeenCalledWith({version: 2, profiles: {dev: {entries: ["builtin:mcp"]}}});
+  view.unmount();
 });

@@ -1,7 +1,7 @@
 import {lstat, realpath, stat} from "node:fs/promises";
 import path from "node:path";
 import {commandOutput, findExecutable} from "../launcher/launcher.js";
-import type {ValidEntry} from "../domain.js";
+import type {ValidFilesystemEntry} from "../domain.js";
 import type {StepResult, UpdateDetector, UpdateExecutor, UpdateStep} from "./updater.js";
 
 interface CommandResult {code: number; stdout: string; stderr: string}
@@ -30,7 +30,7 @@ function commandFailure(result: CommandResult, fallback: string): string {
 }
 
 export function createSystemUpdater(dependencies: SystemUpdaterDependencies): {detect: UpdateDetector; execute: UpdateExecutor} {
-  const detect: UpdateDetector = async (entry: ValidEntry) => {
+  const detect: UpdateDetector = async (entry: ValidFilesystemEntry) => {
     if ((await lstat(entry.registryPath)).isSymbolicLink()) return {ownership: "external"};
     const phases: UpdateStep[] = [];
     const gitMarker = await hasGitMarker(entry.realPath);

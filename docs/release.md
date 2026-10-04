@@ -1,6 +1,6 @@
 # PIW Release Policy
 
-> Status: Next-release policy — Pi 1.0 baseline (implementation pending)
+> Status: Release policy — PIW 2.0.0, Pi 1.0 baseline (implemented; npm publication not performed)
 >
 > Product: `piw`
 >
@@ -36,7 +36,7 @@ PIW does not provide:
 
 ## 2. Supported Runtime Baseline
 
-The next PIW release officially supports:
+PIW 2.0.0 supports:
 
 | Component | Required baseline |
 |---|---|

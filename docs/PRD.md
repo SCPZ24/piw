@@ -1,6 +1,6 @@
 # PIW — Requirements & Product Design
 
-> Status: Next-release contract — Pi 1.0 adaptation (implementation pending)
+> Status: Implemented contract — PIW 2.0.0, Pi 1.0 adaptation (npm publication not performed)
 >
 > Product name: `piw`
 >
@@ -129,7 +129,7 @@ The unreleased historical `/entries` layout receives no migration, dual scanning
 
 ## 4. Persistent State Contract
 
-The next release writes v2 and accepts existing v1 state:
+PIW 2.0.0 writes v2 and accepts existing v1 state:
 
 ```ts
 interface PiwStateV2 {
@@ -592,4 +592,4 @@ Conformance requires at least:
 
 ## 15. Pi 1.0 Adaptation Delivery
 
-The scoped implementation plan is [pi-1-0-adapt-plan.md](pi-1-0-adapt-plan.md). This document describes the next release; code changes, tests, versioning, and publication remain separate work. The existing custom `PI_CODING_AGENT_DIR` package-path issue is deferred and is not addressed by the built-in catalog.
+The scoped implementation plan is [pi-1-0-adapt-plan.md](pi-1-0-adapt-plan.md). The PIW 2.0.0 implementation, verification, and versioning are complete; npm publication remains a separate action and has not been performed. The existing custom `PI_CODING_AGENT_DIR` package-path issue is deferred and is not addressed by the built-in catalog.

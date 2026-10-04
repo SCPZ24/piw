@@ -1,7 +1,6 @@
 # Pi 1.0 极简适配计划
 
-> 状态：文档方案，尚未实现。2026-10-02。
-> 执行方式：按任务顺序在当前会话实现；未经用户要求不分派子代理。实施时可使用 `superpowers:executing-plans`，本轮仅更新文档。
+> 状态：已实现并通过验证，版本 2.0.0；尚未执行 npm 发布。2026-10-02。
 
 **目标：** 让 Profile 能标记并加载 Pi 1.0 内置扩展，保持 piw 作为独立 npm 启动器的定位。
 
@@ -9,7 +8,7 @@
 
 **技术：** 现有 TypeScript、Ink、Node.js、Vitest；不引入依赖，不接入 Pi SDK。
 
-**产品契约：** [PRD.md](PRD.md)。原文件 `RPD.md` 本轮统一更名为 `PRD.md`；[release.md](release.md) 同步引用和下一版兼容基线。
+**产品契约：** [PRD.md](PRD.md)。原文件 `RPD.md` 已统一更名为 `PRD.md`；[release.md](release.md) 已同步引用和 Pi 1.0 兼容基线。
 
 ## 1. 已确定的范围
 
@@ -62,7 +61,7 @@ flowchart LR
 
 ### 状态与旧配置
 
-下一版写入 `PiwStateV2`，结构仍是 `{version, profiles: {name: {entries}}}`。只增加内置引用语义，不增加 Profile 字段。
+2.0.0 写入 `PiwStateV2`，结构仍是 `{version, profiles: {name: {entries}}}`。只增加内置引用语义，不增加 Profile 字段。
 
 ```json
 {
@@ -94,16 +93,16 @@ flowchart LR
 
 ## 4. 实施任务
 
-按以下四步完成；复用现有测试，每步先补对应回归用例再修改代码。本轮文档更新不运行这些命令。
+以下四步已完成，复用现有测试补充回归用例；所列验证命令均已通过。兼容验收时 npm 的 Pi `latest` 为 `1.0.0`。
 
 ### 任务 1：状态与引用
 
 **文件：** `src/domain.ts`、`src/state/state.ts`；调整 `src/app.tsx`、`src/profiles/resolve.ts`、`src/tui/config.tsx` 的状态类型引用；测试在 `tests/domain.test.ts`、`tests/state.test.ts`。
 
-- [ ] 定义 `PiwStateV2` 和 `validateEntryReference`，实现上述 v1 读取、v2 保存规则；保留 `LoadedState.rawBytes` 和原文件 fingerprint。
-- [ ] 覆盖 v1 无写入读取、v2 内置引用、未知引用、非法格式、重复 ID、未来版本拒绝，以及旧名称规则不被放宽。
-- [ ] 覆盖显式保存升级、取消不写盘、并发外部修改仍拒绝覆盖；更新现有状态 fixture 的预期。
-- [ ] 运行 `npx vitest run tests/domain.test.ts tests/state.test.ts`，要求全部通过。
+- [x] 定义 `PiwStateV2` 和 `validateEntryReference`，实现上述 v1 读取、v2 保存规则；保留 `LoadedState.rawBytes` 和原文件 fingerprint。
+- [x] 覆盖 v1 无写入读取、v2 内置引用、未知引用、非法格式、重复 ID、未来版本拒绝，以及旧名称规则不被放宽。
+- [x] 覆盖显式保存升级、取消不写盘、并发外部修改仍拒绝覆盖；更新现有状态 fixture 的预期。
+- [x] 运行 `npx vitest run tests/domain.test.ts tests/state.test.ts`，要求全部通过。
 
 ### 任务 2：内置目录贯通加载和现有界面
 
@@ -113,32 +112,32 @@ flowchart LR
 
 **接口：** `getBuiltinEntries(): ValidEntry[]`；新增 `ValidFilesystemEntry`、`ValidBuiltinEntry` 分支，合称 `ValidEntry`。`resolveProfiles` 继续接收合并后的 `Entry[]`，无需知道来源细节。
 
-- [ ] 本地发现产物增加 `source: "filesystem"`；目录函数返回四个 `source: "builtin"`、`kind: "extension"`、`launchPath === id` 的条目。
-- [ ] 在 snapshot 与 doctor 中合并；内置项进入现有选择、解析和启动流程；在 doctor/update 调用文件系统更新器前按 source 分支处理。
-- [ ] 更新 TUI 与 list 展示，保留未知引用的移除行为，不增加新页面。
-- [ ] 扩充 `tests/registry.test.ts`、`tests/profiles-launcher.test.ts`、`tests/tui.test.tsx`、`tests/doctor.test.ts`、`tests/updater.test.ts`：四个精确目标、混合排序、空 Profile、不自动联选、未知引用、内置项不触发文件系统/更新器调用；旧本地更新与软链接行为仍成立。
-- [ ] 在 `tests/cli-args.test.ts` 明确断言 `-e builtin:mcp` 透传被拒绝，`--tools`/`--exclude-tools` 原样保留；保持现有资源限制。
-- [ ] 运行 `npm run validate`，要求类型、单元测试和构建通过。
+- [x] 本地发现产物增加 `source: "filesystem"`；目录函数返回四个 `source: "builtin"`、`kind: "extension"`、`launchPath === id` 的条目。
+- [x] 在 snapshot 与 doctor 中合并；内置项进入现有选择、解析和启动流程；在 doctor/update 调用文件系统更新器前按 source 分支处理。
+- [x] 更新 TUI 与 list 展示，保留未知引用的移除行为，不增加新页面。
+- [x] 扩充 `tests/registry.test.ts`、`tests/profiles-launcher.test.ts`、`tests/tui.test.tsx`、`tests/doctor.test.ts`、`tests/updater.test.ts`：四个精确目标、混合排序、空 Profile、不自动联选、未知引用、内置项不触发文件系统/更新器调用；旧本地更新与软链接行为仍成立。
+- [x] 在 `tests/cli-args.test.ts` 明确断言 `-e builtin:mcp` 透传被拒绝，`--tools`/`--exclude-tools` 原样保留；保持现有资源限制。
+- [x] 运行 `npm run validate`，要求类型、单元测试和构建通过。
 
 ### 任务 3：Pi 1.0 基线与真实兼容验收
 
 **文件：** `src/launcher/launcher.ts`、`tests/profiles-launcher.test.ts`、`tests/doctor.test.ts`、`tests/pi-package.test.ts`、`scripts/smoke-helpers.mjs`、`scripts/pi-compat.mjs`、`.github/workflows/ci.yml`。
 
-- [ ] 将 `MINIMUM_PI_VERSION` 改为 `1.0.0`；同步 fake Pi 的版本和相关预期，补低版本拒绝用例，不增加逐能力版本判断。
-- [ ] CI 的 Pi 矩阵改为 `["1.0.0", "latest"]`。保留真实 Pi 对本地 extension、skill、prompt、theme、package 的现有检查。
-- [ ] 在现有兼容脚本的隔离环境中增加：空 Profile、单独内置扩展、混合资源、v1 旧 Profile，以及显式工具透传场景。
-- [ ] 分别证明“加载”与“启用”：用 RPC `get_commands` 观察所选 MCP/llama 扩展的命令；Codemode/tool-search 通过测试临时扩展在公开生命周期中读取 `pi.getAllTools()` 与 `pi.getActiveTools()`。测试扩展只属于临时 fixture，不进入 piw 产品或运行时依赖。公开接口依据见 [Pi 扩展文档](https://github.com/earendil-works/pi/blob/v1.0.0/packages/coding-agent/docs/extensions.md#tool-exposure)。
-- [ ] 隔离设置下，未选内置项不出现；仅加载 Codemode/tool-search 可观察到注册但未激活；显式 `--tools` 后观察到用户选择。不连接真实 MCP 服务、不下载模型、不发送模型请求；检查 Pi 原生配置 fixture 与 v1 状态字节未被 piw 改写。
-- [ ] 运行 `npm run validate`、`npm run smoke`、`npm run compat:pi -- --pi-version 1.0.0` 和 `npm run compat:pi -- --pi-version latest`。成功启动不足以代替上述行为断言。
+- [x] 将 `MINIMUM_PI_VERSION` 改为 `1.0.0`；同步 fake Pi 的版本和相关预期，补低版本拒绝用例，不增加逐能力版本判断。
+- [x] CI 的 Pi 矩阵改为 `["1.0.0", "latest"]`。保留真实 Pi 对本地 extension、skill、prompt、theme、package 的现有检查。
+- [x] 在现有兼容脚本的隔离环境中增加：空 Profile、单独内置扩展、混合资源、v1 旧 Profile，以及显式工具透传场景。
+- [x] 分别证明“加载”与“启用”：用 RPC `get_commands` 观察所选 MCP/llama 扩展的命令；Codemode/tool-search 通过测试临时扩展在公开生命周期中读取 `pi.getAllTools()` 与 `pi.getActiveTools()`。测试扩展只属于临时 fixture，不进入 piw 产品或运行时依赖。公开接口依据见 [Pi 扩展文档](https://github.com/earendil-works/pi/blob/v1.0.0/packages/coding-agent/docs/extensions.md#tool-exposure)。
+- [x] 隔离设置下，未选内置项不出现；仅加载 Codemode/tool-search 可观察到注册但未激活；显式 `--tools` 后观察到用户选择。不连接真实 MCP 服务、不下载模型、不发送模型请求；检查 Pi 原生配置 fixture 与 v1 状态字节未被 piw 改写。
+- [x] 运行 `npm run validate`、`npm run smoke`、`npm run compat:pi -- --pi-version 1.0.0` 和 `npm run compat:pi -- --pi-version latest`。成功启动不足以代替上述行为断言。
 
 ### 任务 4：npm 交付说明
 
 **文件：** `README.md`、`README_CN.md`、`CHANGELOG.md`；按 `docs/release.md` 更新 `package.json`、`package-lock.json` 的发布版本。
 
-- [ ] 说明 Pi >=1.0.0、Profile 选择内置项、加载与启用边界、v1/v2 保存和降级限制；删去任何资源透传绕过 Profile 的示例。
-- [ ] 按现有发布策略评估最低 Pi 版本提高与状态升级的版本影响；保持包名、bin 和 npm 安装方式，不添加 Pi SDK 或将 piw 标记为 Pi 插件。
-- [ ] 运行 `npm run pack:check` 与 `npm run smoke:tarball`，要求打包安装后的 CLI 行为通过；tarball fixture 覆盖内置引用编译，不能只验证旧本地 Profile。
-- [ ] npm 发布是单独交付动作，本轮文档任务不执行发布。
+- [x] 说明 Pi >=1.0.0、Profile 选择内置项、加载与启用边界、v1/v2 保存和降级限制；删去任何资源透传绕过 Profile 的示例。
+- [x] 按现有发布策略评估最低 Pi 版本提高与状态升级的版本影响；保持包名、bin 和 npm 安装方式，不添加 Pi SDK 或将 piw 标记为 Pi 插件。
+- [x] 运行 `npm run pack:check` 与 `npm run smoke:tarball`，要求打包安装后的 CLI 行为通过；tarball fixture 覆盖内置引用编译，不能只验证旧本地 Profile。
+npm 发布仍是单独交付动作，本次未执行发布。
 
 ## 5. 容易遗漏的验收边界
 
